@@ -1,0 +1,156 @@
+version: '3.9'
+
+networks:
+  simforge:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  clickhouse-data:
+  grafana-data:
+  prometheus-data:
+
+services:
+
+  # ── PostgreSQL — control plane state ────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: sf-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: simforge
+      POSTGRES_USER: simforge
+      POSTGRES_PASSWORD: simforge_dev_secret
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../postgres/init:/docker-entrypoint-initdb.d:ro
+    networks: [simforge]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U simforge -d simforge']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis — BullMQ + session + pub/sub ──────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: sf-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    networks: [simforge]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── ClickHouse — simulation analytics ───────────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.1-alpine
+    container_name: sf-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: simforge_analytics
+      CLICKHOUSE_USER: simforge
+      CLICKHOUSE_PASSWORD: simforge_dev_secret
+    ports:
+      - '8123:8123'
+      - '9000:9000'
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ../clickhouse/init:/docker-entrypoint-initdb.d:ro
+    networks: [simforge]
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q --spider http://localhost:8123/ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # ── OTel Collector — telemetry ingestion ────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.95.0
+    container_name: sf-otel
+    restart: unless-stopped
+    command: ['--config=/etc/otel-collector-config.yaml']
+    volumes:
+      - ../otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - '4317:4317'
+      - '4318:4318'
+      - '8888:8888'
+    networks: [simforge]
+    depends_on:
+      prometheus:
+        condition: service_healthy
+
+  # ── Prometheus — metrics ─────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    container_name: sf-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    ports:
+      - '9090:9090'
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks: [simforge]
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q --spider http://localhost:9090/-/healthy']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Grafana — dashboards ─────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.3.1
+    container_name: sf-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: simforge_dev_secret
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+    ports:
+      - '3001:3000'
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+    networks: [simforge]
+    depends_on:
+      prometheus:
+        condition: service_healthy
+
+  # ── Bull Board — queue inspection ────────────────────────────────────────────
+  bull-board:
+    image: deadly0/bull-board:latest
+    container_name: sf-bull-board
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - '3002:3000'
+    networks: [simforge]
+    depends_on:
+      redis:
+        condition: service_healthy
