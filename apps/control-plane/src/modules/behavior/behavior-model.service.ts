@@ -61,7 +61,7 @@ export class BehaviorModelService {
         name, description, entry_node_id, state_graph, compiled_hash, created_by
       ) VALUES (
         ${data.name}, ${data.description ?? null}, ${data.entryNodeId},
-        ${this.sql.json(data.nodes)}, ${compiledHash}, ${createdBy}
+      ${JSON.stringify(data.nodes)}, ${compiledHash}, ${createdBy}
       ) RETURNING *
     `;
 
