@@ -1,0 +1,13 @@
+#!/bin/sh
+commit_msg=$(cat "$1")
+pattern='^(feat|fix|chore|docs|style|refactor|perf|test|ci|build)(\(.+\))?: .{1,100}$'
+
+if ! echo "$commit_msg" | grep -Eq "$pattern"; then
+  echo ""
+  echo "✗ Invalid commit message."
+  echo "  Format: type(scope): description"
+  echo "  Example: feat(worker): add circuit breaker"
+  echo "  Types: feat|fix|chore|docs|style|refactor|perf|test|ci|build"
+  echo ""
+  exit 1
+fi

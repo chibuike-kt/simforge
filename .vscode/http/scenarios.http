@@ -1,0 +1,21 @@
+### Create scenario
+POST http://localhost:4000/api/scenarios
+Content-Type: application/json
+
+{
+  "name": "E-commerce ramp test",
+  "targetSystemId": "{{targetId}}",
+  "behaviorModelId": "{{modelId}}",
+  "trafficPattern": {
+    "type": "ramp",
+    "startAgents": 100,
+    "endAgents": 5000,
+    "durationMs": 300000
+  }
+}
+
+### List scenarios
+GET http://localhost:4000/api/scenarios
+
+### Submit run
+POST http://localhost:4000/api/scenarios/{{scenarioId}}/runs

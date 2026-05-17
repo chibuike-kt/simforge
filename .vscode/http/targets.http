@@ -1,0 +1,15 @@
+### Create target system
+POST http://localhost:4000/api/targets
+Content-Type: application/json
+
+{
+  "name": "My API (local)",
+  "allowedOrigins": ["http://localhost:3000"],
+  "maxRps": 100,
+  "maxConcurrency": 500,
+  "mode": "sandbox",
+  "approvalThreshold": 5000
+}
+
+### List targets
+GET http://localhost:4000/api/targets
