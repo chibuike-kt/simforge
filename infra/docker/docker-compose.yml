@@ -26,12 +26,11 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ../postgres/init:/docker-entrypoint-initdb.d:ro
     networks: [simforge]
-healthcheck:
-      test: ['CMD-SHELL', 'wget -q --spider http://localhost:8123/ping']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U simforge -d simforge']
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 60s
 
   # ── Redis — BullMQ + session + pub/sub ──────────────────────────────────────
   redis:
@@ -75,7 +74,7 @@ healthcheck:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 60s
     ulimits:
       nofile:
         soft: 262144
