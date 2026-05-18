@@ -97,26 +97,30 @@ export class ScenarioService {
     const target = await this.targetService.findById(scenario.targetSystemId);
 
     const [run] = await this.sql`
-      INSERT INTO simulation_runs (scenario_id, scenario_version, status, audit_trail)
-      VALUES (
-        ${scenarioId}, ${scenario.version}, ${RunStatus.PENDING},
-        ${this.sql.array([
-          this.sql.json({
-            event: 'submitted',
-            by: submittedBy,
-            at: new Date().toISOString(),
-          }),
-        ])}
-      ) RETURNING *
-    `;
+    INSERT INTO simulation_runs (scenario_id, scenario_version, status, audit_trail)
+    VALUES (
+      ${scenarioId}, ${scenario.version}, ${RunStatus.PENDING},
+      ${this.sql.array([
+        this.sql.json({
+          event: 'submitted',
+          by: submittedBy,
+          at: new Date().toISOString(),
+        }),
+      ])}
+    ) RETURNING *
+  `;
 
     const requiresApproval = this.targetService.requiresApproval(target, 1000);
     if (!requiresApproval) {
       await this.sql`
-        UPDATE simulation_runs
-        SET status = ${RunStatus.APPROVED}, approved_at = NOW()
-        WHERE id = ${run.id}
-      `;
+      UPDATE simulation_runs
+      SET status = ${RunStatus.APPROVED}, approved_at = NOW()
+      WHERE id = ${run.id}
+    `;
+      const { OrchestrationService } =
+        await import('../orchestration/orchestration.service');
+      const orchestration = new OrchestrationService();
+      await orchestration.dispatch(run.id);
     }
 
     return run;

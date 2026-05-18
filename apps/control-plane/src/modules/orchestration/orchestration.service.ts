@@ -75,8 +75,8 @@ export class OrchestrationService {
 
       const signed = signJobEnvelope(envelope);
 
-      await queue.add(`sim:${runId}:${shard.id}`, signed, {
-        jobId: `${runId}:${shard.id}`,
+      await queue.add(`sim-${runId}-${shard.id}`, signed, {
+        jobId: `${runId}-${shard.id}`,
         delay: shard.index * 100,
         priority: 1,
       });
