@@ -4,7 +4,7 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "paths": {
-      "@simforge/shared": ["../../packages/shared/src/index.ts"]
+      "@simforge/shared": ["../../packages/shared/dist/index.d.ts"]
     }
   },
   "include": ["src/**/*"]

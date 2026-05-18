@@ -30,8 +30,8 @@ export function getRedisBullMQ(): IORedis {
 }
 
 export const QUEUES = {
-  SIMULATION_JOBS: 'sf:simulation-jobs',
-  DEAD_LETTER: 'sf:dead-letter',
+  SIMULATION_JOBS: 'sf-simulation-jobs',
+  DEAD_LETTER: 'sf-dead-letter',
 } as const;
 
 let _jobQueue: Queue | null = null;

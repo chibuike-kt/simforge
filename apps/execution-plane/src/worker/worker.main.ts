@@ -26,7 +26,7 @@ const env = z
   })
   .parse(process.env);
 
-const QUEUE = 'sf:simulation-jobs';
+const QUEUE = 'sf-simulation-jobs';
 
 // ─── Redis ────────────────────────────────────────────────────────────────────
 
@@ -187,7 +187,6 @@ worker.on('completed', (job) => console.log(`[Worker] Job ${job.id} done`));
 worker.on('failed', (job, err) => console.error(`[Worker] Job ${job?.id} failed:`, err.message));
 worker.on('error', (err) => console.error('[Worker]', err.message));
 
-// Heartbeat
 setInterval(async () => {
   await redis.set(
     `sf:worker:heartbeat:${env.WORKER_ID}`,
@@ -202,16 +201,6 @@ setInterval(async () => {
   );
 }, 10_000);
 
-await emit(SimForgeEventType.WORKER_STARTED, {
-  workerId: env.WORKER_ID,
-  region: env.WORKER_REGION,
-});
-
-console.log(
-  `[Worker:${env.WORKER_ID}] Ready — region=${env.WORKER_REGION} concurrency=${env.WORKER_CONCURRENCY}`,
-);
-
-// Graceful shutdown
 async function shutdown(sig: string): Promise<void> {
   console.log(`[Worker] ${sig} — shutting down`);
   await worker.close();
@@ -225,6 +214,18 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   shutdown('SIGINT').catch(console.error);
 });
+
+async function main(): Promise<void> {
+  await emit(SimForgeEventType.WORKER_STARTED, {
+    workerId: env.WORKER_ID,
+    region: env.WORKER_REGION,
+  });
+  console.log(
+    `[Worker:${env.WORKER_ID}] Ready — region=${env.WORKER_REGION} concurrency=${env.WORKER_CONCURRENCY}`,
+  );
+}
+
+main().catch(console.error);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

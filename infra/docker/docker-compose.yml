@@ -40,7 +40,7 @@ services:
     command: >
       redis-server
       --maxmemory 2gb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy noeviction
       --appendonly yes
     ports:
       - '6379:6379'

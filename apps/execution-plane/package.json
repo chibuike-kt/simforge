@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "tsx watch src/worker/worker.main.ts",
+    "dev": "tsx --env-file=../../.env src/worker/worker.main.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node --max-old-space-size=4096 dist/worker/worker.main.js",
     "typecheck": "tsc --noEmit",
