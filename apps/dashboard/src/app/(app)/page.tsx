@@ -181,7 +181,7 @@ export default function OverviewPage() {
               SIMULATION VIEW
             </span>
           </div>
-          <div className="h-52">
+          <div className="h-80">
             <WorldMap active={isSimulating} agentCount={activeAgents} />
           </div>
         </div>
