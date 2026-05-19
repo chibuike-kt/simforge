@@ -36,8 +36,8 @@ export interface RealtimeMetrics {
   totalErrors: number;
   p50: number;
   p95: number;
-  regionBreakdown: Record<string, number>; // regionCode -> agent count
-  countryBreakdown: Record<string, number>; // countryCode -> request count
+  regionBreakdown: Record<string, number>;
+  countryBreakdown: Record<string, number>;
 }
 
 interface UseRealtimeOptions {
@@ -60,84 +60,79 @@ export function useRealtime({ runId, onEvent, enabled = true }: UseRealtimeOptio
     countryBreakdown: {},
   });
 
-  // Rolling latency window for p50/p95 calculation
   const latencyWindowRef = useRef<number[]>([]);
   const rpsWindowRef = useRef<{ ts: number }[]>([]);
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
 
-  const processEvent = useCallback(
-    (event: SimulationEvent) => {
-      onEvent?.(event);
+  const processEvent = useCallback((event: SimulationEvent) => {
+    onEventRef.current?.(event);
 
-      setMetrics((prev) => {
-        const next = { ...prev };
+    setMetrics((prev) => {
+      const next = { ...prev };
 
-        switch (event.eventType) {
-          case 'agent.spawned': {
-            next.activeAgents = prev.activeAgents + 1;
-            // Track region breakdown
-            if (event.regionCode) {
-              next.regionBreakdown = {
-                ...prev.regionBreakdown,
-                [event.regionCode]: (prev.regionBreakdown[event.regionCode] ?? 0) + 1,
-              };
-            }
-            break;
+      switch (event.eventType) {
+        case 'agent.spawned': {
+          next.activeAgents = prev.activeAgents + 1;
+          if (event.regionCode) {
+            next.regionBreakdown = {
+              ...prev.regionBreakdown,
+              [event.regionCode]: (prev.regionBreakdown[event.regionCode] ?? 0) + 1,
+            };
           }
-
-          case 'agent.completed':
-          case 'agent.failed': {
-            next.activeAgents = Math.max(0, prev.activeAgents - 1);
-            break;
-          }
-
-          case 'response.received': {
-            next.totalRequests = prev.totalRequests + 1;
-
-            // Track country breakdown
-            if (event.countryCode) {
-              next.countryBreakdown = {
-                ...prev.countryBreakdown,
-                [event.countryCode]: (prev.countryBreakdown[event.countryCode] ?? 0) + 1,
-              };
-            }
-
-            // Update latency window
-            if (event.latencyMs) {
-              latencyWindowRef.current.push(event.latencyMs);
-              if (latencyWindowRef.current.length > 200) {
-                latencyWindowRef.current.shift();
-              }
-              const sorted = [...latencyWindowRef.current].sort((a, b) => a - b);
-              const p50idx = Math.floor(sorted.length * 0.5);
-              const p95idx = Math.floor(sorted.length * 0.95);
-              next.p50 = sorted[p50idx] ?? 0;
-              next.p95 = sorted[p95idx] ?? 0;
-            }
-
-            // Update RPS window
-            const now = Date.now();
-            rpsWindowRef.current.push({ ts: now });
-            rpsWindowRef.current = rpsWindowRef.current.filter((r) => now - r.ts < 1000);
-            next.rps = rpsWindowRef.current.length;
-            break;
-          }
-
-          case 'action.dlq_sent': {
-            next.totalErrors = prev.totalErrors + 1;
-            break;
-          }
-
-          case 'shard.completed': {
-            next.activeAgents = 0;
-            break;
-          }
+          break;
         }
 
-        return next;
-      });
-    },
-    [onEvent],
-  );
+        case 'agent.completed':
+        case 'agent.failed': {
+          next.activeAgents = Math.max(0, prev.activeAgents - 1);
+          break;
+        }
+
+        case 'response.received': {
+          next.totalRequests = prev.totalRequests + 1;
+
+          if (event.countryCode) {
+            next.countryBreakdown = {
+              ...prev.countryBreakdown,
+              [event.countryCode]: (prev.countryBreakdown[event.countryCode] ?? 0) + 1,
+            };
+          }
+
+          if (event.latencyMs) {
+            latencyWindowRef.current.push(event.latencyMs);
+            if (latencyWindowRef.current.length > 200) {
+              latencyWindowRef.current.shift();
+            }
+            const sorted = [...latencyWindowRef.current].sort((a, b) => a - b);
+            next.p50 = sorted[Math.floor(sorted.length * 0.5)] ?? 0;
+            next.p95 = sorted[Math.floor(sorted.length * 0.95)] ?? 0;
+          }
+
+          const now = Date.now();
+          rpsWindowRef.current.push({ ts: now });
+          rpsWindowRef.current = rpsWindowRef.current.filter((r) => now - r.ts < 1000);
+          next.rps = rpsWindowRef.current.length;
+          break;
+        }
+
+        case 'action.dlq_sent': {
+          next.totalErrors = prev.totalErrors + 1;
+          break;
+        }
+
+        case 'shard.completed': {
+          next.activeAgents = 0;
+          break;
+        }
+      }
+
+      return next;
+    });
+  }, []);
+
+  const processEventRef = useRef(processEvent);
+  processEventRef.current = processEvent;
 
   useEffect(() => {
     if (!enabled) return;
@@ -154,11 +149,7 @@ export function useRealtime({ runId, onEvent, enabled = true }: UseRealtimeOptio
     socket.on('connect', () => {
       setConnected(true);
       console.log('[Realtime] Connected:', socket.id);
-
-      // Watch specific run if provided
-      if (runId) {
-        socket.emit('watch:run', { runId });
-      }
+      if (runId) socket.emit('watch:run', { runId });
     });
 
     socket.on('disconnect', () => {
@@ -166,13 +157,15 @@ export function useRealtime({ runId, onEvent, enabled = true }: UseRealtimeOptio
       console.log('[Realtime] Disconnected');
     });
 
-    socket.on('simulation:event', processEvent);
+    socket.on('simulation:event', (event: SimulationEvent) => {
+      processEventRef.current(event);
+    });
 
     socket.on('watch:run:ack', (data: { runId: string; status: string }) => {
       console.log(`[Realtime] Watching run ${data.runId}`);
     });
 
-    socket.on('connect_error', (err) => {
+    socket.on('connect_error', (err: Error) => {
       console.warn('[Realtime] Connection error:', err.message);
     });
 
@@ -182,7 +175,8 @@ export function useRealtime({ runId, onEvent, enabled = true }: UseRealtimeOptio
       socketRef.current = null;
       setConnected(false);
     };
-  }, [enabled, runId, processEvent]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, runId]);
 
   const watchRun = useCallback((id: string) => {
     socketRef.current?.emit('watch:run', { runId: id });
