@@ -29,10 +29,10 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      const res = await api.register(name, email, password);
-      setAuth(res.accessToken, res.user);
-      toast.success('Account created');
-      router.push('/');
+    const res = await api.register(name, email, password);
+    setAuth(res.accessToken, res.user);
+    toast.success('Account created');
+    router.push('/');
     } catch (err) {
       toast.error('Registration failed', {
         description: err instanceof Error ? err.message : 'Unknown error',

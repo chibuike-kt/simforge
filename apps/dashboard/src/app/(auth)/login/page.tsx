@@ -18,23 +18,26 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
+ async function handleSubmit(e: React.FormEvent) {
+   e.preventDefault();
+   setLoading(true);
 
-    try {
-      const res = await api.login(email, password);
-      setAuth(res.accessToken, res.user);
-      toast.success('Welcome back');
-      router.push('/');
-    } catch (err) {
-      toast.error('Sign in failed', {
-        description: err instanceof Error ? err.message : 'Invalid credentials',
-      });
-    } finally {
-      setLoading(false);
-    }
-  }
+   try {
+     const res = await api.login(email, password);
+     setAuth(res.accessToken, res.user);
+     toast.success('Welcome back');
+     // Hard navigation — ensures localStorage is read fresh on next page load
+     setTimeout(() => {
+       window.location.href = '/';
+     }, 500);
+   } catch (err) {
+     console.error('[Login] error:', err);
+     toast.error('Sign in failed', {
+       description: err instanceof Error ? err.message : 'Invalid credentials',
+     });
+     setLoading(false);
+   }
+ }
 
   return (
     <div className="animate-slide-in-up">
