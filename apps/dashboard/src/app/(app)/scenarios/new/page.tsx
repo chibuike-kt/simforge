@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { useTargets, useBehaviors, useCreateScenario } from '@/hooks/use-api';
 import { TargetSystem, BehaviorModel, TrafficPattern } from '@/types';
 import { cn } from '@/lib/utils';
+import { Minus, TrendingUp, Zap, BarChart2, AlignJustify } from 'lucide-react';
 
 const STEPS = ['Details', 'Target', 'Behavior', 'Traffic', 'Review'];
 
@@ -16,13 +17,23 @@ const TRAFFIC_PATTERNS: {
   type: TrafficPattern;
   label: string;
   desc: string;
-  icon: string;
+  icon: React.ReactNode;
 }[] = [
-  { type: 'steady', label: 'Steady', desc: 'Constant load over time', icon: '▬' },
-  { type: 'ramp', label: 'Ramp', desc: 'Gradually increase agents', icon: '↗' },
-  { type: 'burst', label: 'Burst', desc: 'Sudden spike of traffic', icon: '⚡' },
-  { type: 'viral', label: 'Viral', desc: 'Exponential growth curve', icon: '📈' },
-  { type: 'step', label: 'Step', desc: 'Incremental load steps', icon: '▤' },
+  { type: 'steady', label: 'Steady', desc: 'Constant load over time', icon: <Minus size={16} /> },
+  {
+    type: 'ramp',
+    label: 'Ramp',
+    desc: 'Gradually increase agents',
+    icon: <TrendingUp size={16} />,
+  },
+  { type: 'burst', label: 'Burst', desc: 'Sudden spike of traffic', icon: <Zap size={16} /> },
+  {
+    type: 'viral',
+    label: 'Viral',
+    desc: 'Exponential growth curve',
+    icon: <BarChart2 size={16} />,
+  },
+  { type: 'step', label: 'Step', desc: 'Incremental load steps', icon: <AlignJustify size={16} /> },
 ];
 
 export default function NewScenarioPage() {
@@ -306,7 +317,7 @@ export default function NewScenarioPage() {
                       : 'border-zinc-700 bg-zinc-800/50 hover:border-zinc-600',
                   )}
                 >
-                  <div className="text-lg mb-1">{p.icon}</div>
+                  <div className="flex justify-center mb-1.5 text-zinc-400">{p.icon}</div>
                   <p className="text-[11px] font-medium text-zinc-300">{p.label}</p>
                 </button>
               ))}
