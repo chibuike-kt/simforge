@@ -1,5 +1,19 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toCamel(obj: any): any {
+  if (Array.isArray(obj)) return obj.map(toCamel);
+  if (obj && typeof obj === 'object') {
+    return Object.fromEntries(
+      Object.entries(obj).map(([k, v]) => [
+        k.replace(/_([a-z])/g, (_, c) => c.toUpperCase()),
+        toCamel(v),
+      ]),
+    );
+  }
+  return obj;
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -11,7 +25,8 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(error.message ?? `HTTP ${res.status}`);
   }
 
-  return res.json();
+  const data = await res.json();
+  return toCamel(data);
 }
 
 export const api = {

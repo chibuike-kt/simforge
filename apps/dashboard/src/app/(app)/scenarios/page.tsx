@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { Plus, Activity, ArrowRight, Clock, Play, Archive, FileText, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { formatDate } from '@/lib/utils';
 import { Scenario, ScenarioStatus } from '@/types';
@@ -110,7 +111,16 @@ export default function ScenariosPage() {
                       size="sm"
                       variant="outline"
                       className="h-7 text-xs border-zinc-700 text-zinc-400 hover:text-white gap-1"
-                      onClick={() => publishScenario.mutate(scenario.id)}
+                      onClick={async () => {
+                        try {
+                          await publishScenario.mutateAsync(scenario.id);
+                          toast.success('Scenario published');
+                        } catch (err) {
+                          toast.error('Failed to publish', {
+                            description: err instanceof Error ? err.message : 'Unknown error',
+                          });
+                        }
+                      }}
                       disabled={publishScenario.isPending}
                     >
                       {publishScenario.isPending ? (
@@ -123,7 +133,18 @@ export default function ScenariosPage() {
                     <Button
                       size="sm"
                       className="h-7 text-xs bg-blue-500 hover:bg-blue-600 text-white gap-1"
-                      onClick={() => submitRun.mutate(scenario.id)}
+                      onClick={async () => {
+                        try {
+                          await submitRun.mutateAsync(scenario.id);
+                          toast.success('Run submitted', {
+                            description: 'Your simulation is being dispatched to workers',
+                          });
+                        } catch (err) {
+                          toast.error('Failed to submit run', {
+                            description: err instanceof Error ? err.message : 'Unknown error',
+                          });
+                        }
+                      }}
                       disabled={submitRun.isPending}
                     >
                       {submitRun.isPending ? (

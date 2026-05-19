@@ -21,13 +21,16 @@ export function formatPercent(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
 }
 
-export function formatDate(iso: string): string {
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(iso));
+  }).format(d);
 }
 
 export function getStatusColor(status: RunStatus): string {
