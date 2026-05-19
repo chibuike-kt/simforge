@@ -9,6 +9,7 @@ import { AgentRuntime } from '../agent/agent-runtime';
 import { SeededRandom } from '../agent/seeded-random';
 import { TokenBucket } from './token-bucket';
 import { verifyJobEnvelope } from '../security/job-verification';
+import { pickRegionProfile } from '../agent/region-profile';
 
 // ─── Env ──────────────────────────────────────────────────────────────────────
 
@@ -77,7 +78,12 @@ async function emit(type: SimForgeEventType, payload: object): Promise<void> {
     ...payload,
   };
   const runId = (payload as Record<string, string>).runId;
-  if (runId) await redis.publish(`sf:pubsub:run:${runId}`, JSON.stringify(event));
+  if (runId) {
+    // Publish to run-specific channel for WebSocket streaming
+    await redis.publish(`sf:pubsub:run:${runId}`, JSON.stringify(event));
+    // Also publish to global channel for dashboard overview
+    await redis.publish(`sf:pubsub:global`, JSON.stringify(event));
+  }
   if (env.WORKER_REGION === 'local') {
     console.log(`[Event] ${type}`);
   }
@@ -117,7 +123,11 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
     await sleep(envelope.timingConfig.startOffsetMs);
   }
 
-  await emit(SimForgeEventType.SHARD_STARTED, { runId, shardId, agentCount: envelope.agentCount });
+  await emit(SimForgeEventType.SHARD_STARTED, {
+    runId,
+    shardId,
+    agentCount: envelope.agentCount,
+  });
 
   // 5. Shared shard resources
   const effectiveRps = Math.min(envelope.targetConfig.maxRps, env.GLOBAL_RPS_CAP);
@@ -128,14 +138,25 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
     rateLimiter,
   );
 
-  // 6. Spawn agents
+  // 6. Spawn agents — each gets a region profile based on distribution
   let completed = 0;
   let failed = 0;
   const parentSeed = hashStr(runId + shardId);
+  const shardRng = new SeededRandom(parentSeed);
   const batch: Promise<void>[] = [];
 
+  // Region distribution — from job data or default internet distribution
+  const regionDistribution = (envelope as unknown as Record<string, unknown>).regionDistribution as
+    | { regionCode: string; agentPct: number }[]
+    | undefined;
+
   for (let i = 0; i < envelope.agentCount; i++) {
-    const seed = SeededRandom.childSeed(parentSeed, i);
+    const agentSeed = SeededRandom.childSeed(parentSeed, i);
+    const agentRng = new SeededRandom(agentSeed);
+
+    // Pick region for this agent
+    const regionProfile = pickRegionProfile(agentRng, regionDistribution);
+
     const agent = new AgentRuntime(
       envelope.behaviorModel,
       httpAdapter,
@@ -144,7 +165,8 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
       runId,
       shardId,
       env.WORKER_ID,
-      seed,
+      agentSeed,
+      regionProfile,
     );
 
     batch.push(
@@ -187,6 +209,8 @@ worker.on('completed', (job) => console.log(`[Worker] Job ${job.id} done`));
 worker.on('failed', (job, err) => console.error(`[Worker] Job ${job?.id} failed:`, err.message));
 worker.on('error', (err) => console.error('[Worker]', err.message));
 
+// ─── Heartbeat ────────────────────────────────────────────────────────────────
+
 setInterval(async () => {
   await redis.set(
     `sf:worker:heartbeat:${env.WORKER_ID}`,
@@ -201,6 +225,8 @@ setInterval(async () => {
   );
 }, 10_000);
 
+// ─── Shutdown ─────────────────────────────────────────────────────────────────
+
 async function shutdown(sig: string): Promise<void> {
   console.log(`[Worker] ${sig} — shutting down`);
   await worker.close();
@@ -208,12 +234,10 @@ async function shutdown(sig: string): Promise<void> {
   process.exit(0);
 }
 
-process.on('SIGTERM', () => {
-  shutdown('SIGTERM').catch(console.error);
-});
-process.on('SIGINT', () => {
-  shutdown('SIGINT').catch(console.error);
-});
+process.on('SIGTERM', () => shutdown('SIGTERM').catch(console.error));
+process.on('SIGINT', () => shutdown('SIGINT').catch(console.error));
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   await emit(SimForgeEventType.WORKER_STARTED, {

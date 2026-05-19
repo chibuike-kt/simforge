@@ -13,6 +13,7 @@ import {
 import { HttpAdapter, HttpResult } from '../adapters/http/http.adapter';
 import { TokenBucket } from '../worker/token-bucket';
 import { SeededRandom } from './seeded-random';
+import { RegionProfile, applyRegionProfile } from './region-profile';
 
 const MAX_STEPS = 10_000;
 const MAX_HISTORY = 8;
@@ -33,6 +34,7 @@ export class AgentRuntime {
     private readonly shardId: string,
     private readonly workerId: string,
     entropySeed: number,
+    private readonly regionProfile?: RegionProfile,
   ) {
     this.rng = new SeededRandom(entropySeed);
     this.state = {
@@ -61,6 +63,9 @@ export class AgentRuntime {
       agentId: this.state.agentId,
       behaviorModelId: this.model.id,
       entryNodeId: this.model.entryNodeId,
+      regionCode: this.regionProfile?.regionCode ?? null,
+      countryCode: this.regionProfile?.countryCode ?? null,
+      label: this.regionProfile?.label ?? null,
     });
 
     this.state.status = AgentStatus.ACTIVE;
@@ -78,6 +83,8 @@ export class AgentRuntime {
           agentId: this.state.agentId,
           finalNodeId: node.id,
           steps,
+          regionCode: this.regionProfile?.regionCode ?? null,
+          countryCode: this.regionProfile?.countryCode ?? null,
         });
         return;
       }
@@ -87,6 +94,7 @@ export class AgentRuntime {
         await this.emit(SimForgeEventType.AGENT_LOOP_DETECTED, {
           agentId: this.state.agentId,
           nodeId: this.state.currentNodeId,
+          regionCode: this.regionProfile?.regionCode ?? null,
         });
         return;
       }
@@ -94,8 +102,12 @@ export class AgentRuntime {
       const now = Date.now();
       if (this.state.cooldownUntil > now) await sleep(this.state.cooldownUntil - now);
 
+      // Apply region-specific think time jitter on top of node think time
       const think = this.sampleThinkTime(node);
-      if (think > 0) await sleep(think);
+      const regionJitter = this.regionProfile
+        ? Math.round(this.rng.next() * this.regionProfile.jitterMs)
+        : 0;
+      if (think + regionJitter > 0) await sleep(think + regionJitter);
 
       let result: HttpResult | null = null;
 
@@ -116,6 +128,8 @@ export class AgentRuntime {
         await this.emit(SimForgeEventType.AGENT_COMPLETED, {
           agentId: this.state.agentId,
           steps,
+          regionCode: this.regionProfile?.regionCode ?? null,
+          countryCode: this.regionProfile?.countryCode ?? null,
         });
         return;
       }
@@ -124,6 +138,7 @@ export class AgentRuntime {
         agentId: this.state.agentId,
         fromNodeId: this.state.currentNodeId,
         toNodeId: nextId,
+        regionCode: this.regionProfile?.regionCode ?? null,
       });
 
       this.pushHistory(this.state.currentNodeId);
@@ -138,40 +153,77 @@ export class AgentRuntime {
       agentId: this.state.agentId,
       nodeId: node.id,
       method: action.method,
+      regionCode: this.regionProfile?.regionCode ?? null,
+      countryCode: this.regionProfile?.countryCode ?? null,
     });
 
-    const result = await this.http.execute(action, {
-      sessionToken: this.state.sessionToken,
-      agentId: this.state.agentId,
-      ...this.state.customKv,
-    });
+    // Apply region-specific headers and user agent
+    const regionHeaders = this.regionProfile
+      ? applyRegionProfile(this.regionProfile, this.rng)
+      : {};
 
-    if (result.error) {
+    const result = await this.http.execute(
+      { ...action, headers: { ...action.headers, ...regionHeaders } },
+      {
+        sessionToken: this.state.sessionToken,
+        agentId: this.state.agentId,
+        ...this.state.customKv,
+      },
+    );
+
+    // Simulate region packet loss
+    const packetLost = this.regionProfile && this.rng.next() < this.regionProfile.packetLossRate;
+
+    if (result.error || packetLost) {
       this.state.retryCount++;
-      if (this.state.retryCount > node.maxRetries) {
+
+      // Region-specific retry rate check
+      const shouldRetry = !this.regionProfile || this.rng.next() < this.regionProfile.retryRate;
+
+      if (this.state.retryCount > node.maxRetries || !shouldRetry) {
         await this.emit(SimForgeEventType.ACTION_DLQ_SENT, {
           agentId: this.state.agentId,
           nodeId: node.id,
-          error: result.error,
+          error: packetLost ? 'packet_loss' : result.error,
+          regionCode: this.regionProfile?.regionCode ?? null,
+          countryCode: this.regionProfile?.countryCode ?? null,
         });
       } else {
         await this.emit(SimForgeEventType.ACTION_RETRIED, {
           agentId: this.state.agentId,
           nodeId: node.id,
           retryCount: this.state.retryCount,
+          regionCode: this.regionProfile?.regionCode ?? null,
         });
       }
     } else {
+      // Add region latency on top of actual latency
+      const regionLatency = this.regionProfile ? this.sampleRegionLatency() : 0;
+
       await this.emit(SimForgeEventType.RESPONSE_RECEIVED, {
         agentId: this.state.agentId,
         statusCode: result.statusCode,
-        latencyMs: result.latencyMs,
+        latencyMs: result.latencyMs + regionLatency,
+        actualLatencyMs: result.latencyMs,
+        regionLatencyMs: regionLatency,
         nodeId: node.id,
         bodyHash: result.bodyHash,
+        regionCode: this.regionProfile?.regionCode ?? null,
+        countryCode: this.regionProfile?.countryCode ?? null,
       });
     }
 
     return result;
+  }
+
+  private sampleRegionLatency(): number {
+    if (!this.regionProfile) return 0;
+    const { p50, p95, jitterMs } = this.regionProfile;
+    const u1 = Math.max(0.0001, this.rng.next());
+    const u2 = Math.max(0.0001, this.rng.next());
+    const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    const base = p50 + z * ((p95 - p50) / 1.645);
+    return Math.max(0, Math.round(base + (this.rng.next() - 0.5) * jitterMs));
   }
 
   private selectTransition(node: BehaviorNode, result: HttpResult | null): string | null {
@@ -229,6 +281,8 @@ export class AgentRuntime {
       agentId: this.state.agentId,
       reason,
       nodeId: this.state.currentNodeId,
+      regionCode: this.regionProfile?.regionCode ?? null,
+      countryCode: this.regionProfile?.countryCode ?? null,
     });
   }
 }

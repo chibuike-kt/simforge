@@ -7,6 +7,7 @@ import { OrchestrationModule } from './modules/orchestration/orchestration.modul
 import { ApprovalModule } from './modules/approval/approval.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
+import { RealtimeModule } from './modules/realtime/realtime.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { UsersModule } from './modules/users/users.module';
     ScenarioModule,
     OrchestrationModule,
     ApprovalModule,
+    RealtimeModule,
   ],
 })
 export class AppModule {}

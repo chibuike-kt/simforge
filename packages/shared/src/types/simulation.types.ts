@@ -143,3 +143,70 @@ export interface SimulationJobEnvelope {
   signedAt: string;
   signature: string;
 }
+
+// ─── Regional Traffic Profiles ───────────────────────────────────────────────
+
+export type RegionCode =
+  | 'NA_WEST'    // North America West (US-CA, US-WA, US-OR)
+  | 'NA_EAST'    // North America East (US-NY, US-VA, CA)
+  | 'EU_WEST'    // Western Europe (GB, FR, DE, NL)
+  | 'EU_EAST'    // Eastern Europe (PL, UA, RO, CZ)
+  | 'ASIA_EAST'  // East Asia (JP, KR, TW)
+  | 'ASIA_SE'    // Southeast Asia (SG, TH, VN, ID, MY)
+  | 'ASIA_SOUTH' // South Asia (IN, PK, BD, LK)
+  | 'ASIA_CENTRAL' // Central Asia + Middle East (SA, AE, TR, KZ)
+  | 'AFRICA'     // Africa (NG, ZA, KE, EG, GH)
+  | 'LATAM'      // Latin America (BR, MX, CO, AR, PE)
+  | 'OCEANIA';   // Oceania (AU, NZ)
+
+export interface LatencyProfile {
+  p50: number;   // ms
+  p95: number;   // ms
+  p99: number;   // ms
+  jitter: number; // ms — random variance added per request
+}
+
+export interface ConnectionProfile {
+  timeoutRate: number;    // 0-1 — probability of timeout
+  retryRate: number;      // 0-1 — probability of retry on failure
+  packetLossRate: number; // 0-1 — probability of packet loss
+  keepAlive: boolean;     // whether to use keep-alive connections
+  http2: boolean;         // whether to use HTTP/2
+}
+
+export interface DeviceProfile {
+  mobilePct: number;   // 0-1 — percentage of mobile traffic
+  desktopPct: number;  // 0-1 — percentage of desktop traffic
+  botPct: number;      // 0-1 — percentage of bot/crawler traffic
+}
+
+export interface RegionTrafficProfile {
+  code: RegionCode;
+  label: string;
+  countries: string[];          // ISO country codes
+  rpsWeight: number;            // 0-1 — relative traffic contribution
+  latency: LatencyProfile;
+  connection: ConnectionProfile;
+  device: DeviceProfile;
+  userAgents: string[];         // pool of realistic user agents for this region
+  headers: Record<string, string>; // region-specific headers (Accept-Language etc)
+}
+
+// ─── Scenario Source Regions ─────────────────────────────────────────────────
+
+export interface ScenarioRegion {
+  regionCode: RegionCode;
+  agentPct: number;   // 0-1 — what % of total agents come from this region
+  enabled: boolean;
+}
+
+export interface TrafficPattern {
+  type: 'steady' | 'ramp' | 'burst' | 'viral' | 'step';
+  steadyAgents?: number;
+  startAgents?: number;
+  endAgents?: number;
+  durationMs?: number;
+  burstAgents?: number;
+  stepCount?: number;
+  stepAgents?: number;
+}
