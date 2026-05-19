@@ -15,9 +15,15 @@ function toCamel(obj: any): any {
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('sf_token') : null;
+
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers ?? {}),
+    },
   });
 
   if (!res.ok) {
@@ -30,6 +36,18 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // Auth
+  login: (email: string, password: string) =>
+    apiFetch<{ accessToken: string; user: { id: string; email: string; name: string } }>(
+      '/api/auth/login',
+      { method: 'POST', body: JSON.stringify({ email, password }) },
+    ),
+  register: (name: string, email: string, password: string) =>
+    apiFetch<{ accessToken: string; user: { id: string; email: string; name: string } }>(
+      '/api/auth/register',
+      { method: 'POST', body: JSON.stringify({ name, email, password }) },
+    ),
+
   // Targets
   getTargets: () => apiFetch<unknown[]>('/api/targets'),
   createTarget: (data: unknown) =>

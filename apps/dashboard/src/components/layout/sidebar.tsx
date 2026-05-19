@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Play,
@@ -11,47 +11,27 @@ import {
   Settings,
   ChevronRight,
   Zap,
+  LogOut,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { clearAuth, getUser } from '@/lib/auth';
 
 const navigation = [
-  {
-    label: 'Overview',
-    href: '/',
-    icon: LayoutDashboard,
-  },
-  {
-    label: 'Runs',
-    href: '/runs',
-    icon: Play,
-  },
-  {
-    label: 'Scenarios',
-    href: '/scenarios',
-    icon: Activity,
-  },
-  {
-    label: 'Targets',
-    href: '/targets',
-    icon: Target,
-  },
-  {
-    label: 'Behaviors',
-    href: '/behaviors',
-    icon: GitBranch,
-  },
+  { label: 'Overview', href: '/', icon: LayoutDashboard },
+  { label: 'Runs', href: '/runs', icon: Play },
+  { label: 'Scenarios', href: '/scenarios', icon: Activity },
+  { label: 'Targets', href: '/targets', icon: Target },
+  { label: 'Behaviors', href: '/behaviors', icon: GitBranch },
 ];
 
 const bottomNavigation = [
-  {
-    label: 'Settings',
-    href: '/settings',
-    icon: Settings,
-  },
+  { label: 'Settings', href: '/settings', icon: Settings },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const user = getUser();
 
   function isActive(href: string) {
     if (href === '/') return pathname === '/';
@@ -65,12 +45,7 @@ export function Sidebar() {
         <Link href="/" className="flex items-center gap-2.5 group">
           <div className="w-7 h-7 rounded-md bg-blue-500 flex items-center justify-center flex-shrink-0 group-hover:bg-blue-400 transition-colors">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="text-white">
-              <path
-                d="M2 8L8 2L14 8L8 14L2 8Z"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinejoin="round"
-              />
+              <path d="M2 8L8 2L14 8L8 14L2 8Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
               <path d="M8 5L11 8L8 11L5 8L8 5Z" fill="currentColor" />
             </svg>
           </div>
@@ -157,12 +132,28 @@ export function Sidebar() {
       <div className="px-3 pb-4 border-t border-zinc-800/60 pt-3">
         <div className="flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-full bg-blue-500/20 border border-blue-500/30 flex items-center justify-center flex-shrink-0">
-            <span className="text-[10px] font-semibold text-blue-400">SF</span>
+            <span className="text-[10px] font-semibold text-blue-400">
+              {user?.name?.charAt(0)?.toUpperCase() ?? 'U'}
+            </span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-zinc-300 truncate">Admin</p>
-            <p className="text-[10px] text-zinc-600 truncate">admin@simforge.dev</p>
+            <p className="text-xs font-medium text-zinc-300 truncate">
+              {user?.name ?? 'User'}
+            </p>
+            <p className="text-[10px] text-zinc-600 truncate">
+              {user?.email ?? ''}
+            </p>
           </div>
+          <button
+            onClick={() => {
+              clearAuth();
+              router.push('/login');
+            }}
+            className="text-zinc-600 hover:text-zinc-400 transition-colors"
+            title="Sign out"
+          >
+            <LogOut size={13} />
+          </button>
         </div>
       </div>
     </aside>

@@ -2,34 +2,41 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, ArrowRight, Loader2, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { api } from '@/lib/api';
+import { setAuth } from '@/lib/auth';
+import { toast } from 'sonner';
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
 
   const passwordStrength =
     password.length === 0 ? 0 : password.length < 8 ? 1 : password.length < 12 ? 2 : 3;
-
   const strengthLabel = ['', 'Weak', 'Good', 'Strong'];
   const strengthColor = ['', 'bg-red-500', 'bg-yellow-500', 'bg-green-500'];
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    setError('');
+
     try {
-      await new Promise((r) => setTimeout(r, 1200));
-      window.location.href = '/';
-    } catch {
-      setError('Failed to create account.');
+      const res = await api.register(name, email, password);
+      setAuth(res.accessToken, res.user);
+      toast.success('Account created');
+      router.push('/');
+    } catch (err) {
+      toast.error('Registration failed', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      });
     } finally {
       setLoading(false);
     }
@@ -47,14 +54,10 @@ export default function RegisterPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <Label
-              htmlFor="name"
-              className="text-zinc-400 text-xs font-medium uppercase tracking-wider"
-            >
+            <Label className="text-zinc-400 text-xs font-medium uppercase tracking-wider">
               Full name
             </Label>
             <Input
-              id="name"
               type="text"
               placeholder="Kingsley Chibuike"
               value={name}
@@ -65,14 +68,10 @@ export default function RegisterPage() {
           </div>
 
           <div className="space-y-1.5">
-            <Label
-              htmlFor="email"
-              className="text-zinc-400 text-xs font-medium uppercase tracking-wider"
-            >
+            <Label className="text-zinc-400 text-xs font-medium uppercase tracking-wider">
               Work email
             </Label>
             <Input
-              id="email"
               type="email"
               placeholder="you@company.com"
               value={email}
@@ -83,15 +82,11 @@ export default function RegisterPage() {
           </div>
 
           <div className="space-y-1.5">
-            <Label
-              htmlFor="password"
-              className="text-zinc-400 text-xs font-medium uppercase tracking-wider"
-            >
+            <Label className="text-zinc-400 text-xs font-medium uppercase tracking-wider">
               Password
             </Label>
             <div className="relative">
               <Input
-                id="password"
                 type={showPassword ? 'text' : 'password'}
                 placeholder="Min. 8 characters"
                 value={password}
@@ -108,7 +103,6 @@ export default function RegisterPage() {
                 {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </div>
-
             {password.length > 0 && (
               <div className="space-y-1">
                 <div className="flex gap-1">
@@ -126,12 +120,6 @@ export default function RegisterPage() {
             )}
           </div>
 
-          {error && (
-            <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2">
-              <p className="text-xs text-red-400">{error}</p>
-            </div>
-          )}
-
           <Button
             type="submit"
             disabled={loading}
@@ -146,7 +134,6 @@ export default function RegisterPage() {
           </Button>
         </form>
 
-        {/* Feature list */}
         <div className="mt-4 pt-4 border-t border-zinc-800 space-y-2">
           {[
             'Simulate up to 10M+ concurrent users',
