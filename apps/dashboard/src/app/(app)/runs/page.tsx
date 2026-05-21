@@ -2,13 +2,25 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Play, ArrowRight, Clock, Search, RefreshCw, Loader2, AlertCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import {
+  Play,
+  Clock,
+  Search,
+  RefreshCw,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
+  XCircle,
+  Circle,
+  ChevronRight,
+  Zap,
+  Users,
+} from 'lucide-react';
 import { RunStatusBadge } from '@/components/simulation/run-status-badge';
 import { formatDate } from '@/lib/utils';
 import { SimulationRun, RunStatus } from '@/types';
 import { usePendingRuns, useApproveRun } from '@/hooks/use-api';
+import { cn } from '@/lib/utils';
 
 const STATUS_FILTERS: { label: string; value: RunStatus | 'all' }[] = [
   { label: 'All', value: 'all' },
@@ -18,192 +30,192 @@ const STATUS_FILTERS: { label: string; value: RunStatus | 'all' }[] = [
   { label: 'Pending', value: 'pending' },
 ];
 
+function StatusIcon({ status }: { status: RunStatus }) {
+  switch (status) {
+    case 'completed':
+      return <CheckCircle2 size={13} className="text-green-400" />;
+    case 'failed':
+      return <XCircle size={13} className="text-red-400" />;
+    case 'running':
+      return <Circle size={13} className="text-blue-400 animate-pulse fill-blue-400" />;
+    default:
+      return <Circle size={13} className="text-zinc-600" />;
+  }
+}
+
 export default function RunsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<RunStatus | 'all'>('all');
-  const { data: pendingRuns, isLoading: pendingLoading } = usePendingRuns();
+  const { data: pendingRuns, isLoading, refetch } = usePendingRuns();
   const approveRun = useApproveRun();
 
-  const pending = (pendingRuns as SimulationRun[]) ?? [];
+  const runs = (pendingRuns as SimulationRun[]) ?? [];
+  const filtered = runs.filter((run) => {
+    const matchSearch = run.id.toLowerCase().includes(search.toLowerCase());
+    const matchStatus = statusFilter === 'all' || run.status === statusFilter;
+    return matchSearch && matchStatus;
+  });
 
   return (
-    <div className="space-y-5 animate-slide-in-up">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-white">Simulation Runs</h2>
-          <p className="text-sm text-zinc-500 mt-0.5">Monitor and manage all simulation runs</p>
-        </div>
-        <Link href="/scenarios">
-          <Button
-            size="sm"
-            className="h-8 text-xs bg-blue-500 hover:bg-blue-600 text-white gap-1.5"
-          >
-            <Play size={12} />
-            New Run
-          </Button>
-        </Link>
-      </div>
+    <div className="h-full flex flex-col overflow-hidden bg-[#0f0f0f]">
+      {/* Toolbar — like Postman collection runner toolbar */}
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-zinc-800/60 bg-[#1a1a1a] flex-shrink-0">
+        <span className="text-sm font-medium text-zinc-300">Runs</span>
 
-      {/* Pending approvals banner */}
-      {!pendingLoading && pending.length > 0 && (
-        <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4">
-          <div className="flex items-start gap-3">
-            <AlertCircle size={15} className="text-yellow-400 flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <p className="text-sm font-medium text-yellow-400">
-                {pending.length} run{pending.length > 1 ? 's' : ''} awaiting approval
-              </p>
-              <p className="text-xs text-zinc-500 mt-0.5">
-                These runs are ready to dispatch but require manual approval
-              </p>
-            </div>
-          </div>
-          <div className="mt-3 space-y-2">
-            {pending.map((run) => (
-              <div
-                key={run.id}
-                className="flex items-center justify-between bg-zinc-900 rounded-lg px-3 py-2"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-zinc-400">{run.id.slice(0, 12)}...</span>
-                  <RunStatusBadge status={run.status} />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-zinc-600">{formatDate(run.createdAt)}</span>
-                  <Button
-                    size="sm"
-                    className="h-6 text-[11px] bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 border border-yellow-500/20 gap-1"
-                    onClick={() => approveRun.mutate(run.id)}
-                    disabled={approveRun.isPending}
-                  >
-                    {approveRun.isPending ? <Loader2 size={9} className="animate-spin" /> : null}
-                    Approve
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-xs">
-          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-          <Input
-            placeholder="Search runs..."
+        {/* Search */}
+        <div className="relative flex-1 max-w-sm">
+          <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
+          <input
+            placeholder="Search by run ID..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-8 h-8 text-xs bg-zinc-900 border-zinc-800 text-zinc-300 placeholder:text-zinc-600 focus:border-blue-500"
+            className="w-full pl-8 pr-3 py-1.5 bg-zinc-800/50 border border-zinc-700/50 rounded text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/50 transition-colors"
           />
         </div>
 
-        <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
+        {/* Status filter */}
+        <div className="flex items-center gap-0.5 bg-zinc-800/50 border border-zinc-700/50 rounded p-0.5">
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.value}
               onClick={() => setStatusFilter(f.value)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+              className={cn(
+                'px-2.5 py-1 rounded text-[11px] font-medium transition-all',
                 statusFilter === f.value
                   ? 'bg-zinc-700 text-white'
-                  : 'text-zinc-500 hover:text-zinc-300'
-              }`}
+                  : 'text-zinc-500 hover:text-zinc-300',
+              )}
             >
               {f.label}
             </button>
           ))}
         </div>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
+        <button
+          onClick={() => refetch()}
+          className="p-1.5 text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800 rounded transition-colors"
         >
-          <RefreshCw size={13} />
-        </Button>
+          <RefreshCw size={12} />
+        </button>
+
+        <div className="ml-auto">
+          <Link href="/scenarios">
+            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium transition-colors">
+              <Play size={11} />
+              New Run
+            </button>
+          </Link>
+        </div>
       </div>
 
-      {/* Empty state */}
-      {!pendingLoading && pending.length === 0 && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900">
-          <div className="grid grid-cols-12 gap-4 px-4 py-2.5 border-b border-zinc-800 bg-zinc-950/50">
-            <div className="col-span-3 text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
-              Run ID
-            </div>
-            <div className="col-span-3 text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
-              Scenario
-            </div>
-            <div className="col-span-2 text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
-              Status
-            </div>
-            <div className="col-span-2 text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
-              Created
-            </div>
-            <div className="col-span-2 text-[10px] font-medium text-zinc-600 uppercase tracking-wider"></div>
-          </div>
-          <div className="py-16 text-center">
-            <Play size={24} className="text-zinc-700 mx-auto mb-3" />
-            <p className="text-sm text-zinc-600">No runs yet</p>
-            <p className="text-xs text-zinc-700 mt-1">Go to Scenarios and submit a run</p>
-          </div>
-        </div>
-      )}
-
-      {/* Pending runs table */}
-      {pending.length > 0 && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
-          <div className="grid grid-cols-12 gap-4 px-4 py-2.5 border-b border-zinc-800 bg-zinc-950/50">
-            <div className="col-span-4 text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
-              Run ID
-            </div>
-            <div className="col-span-3 text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
-              Status
-            </div>
-            <div className="col-span-3 text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
-              Created
-            </div>
-            <div className="col-span-2 text-[10px] font-medium text-zinc-600 uppercase tracking-wider"></div>
-          </div>
-          <div className="divide-y divide-zinc-800">
-            {pending
-              .filter((run) => {
-                const matchSearch = run.id.includes(search);
-                const matchStatus = statusFilter === 'all' || run.status === statusFilter;
-                return matchSearch && matchStatus;
-              })
+      {/* Pending approval banner */}
+      {!isLoading && runs.some((r) => r.status === 'pending') && (
+        <div className="flex items-center gap-3 px-4 py-2 bg-yellow-500/5 border-b border-yellow-500/20 flex-shrink-0">
+          <AlertCircle size={12} className="text-yellow-400 flex-shrink-0" />
+          <span className="text-xs text-yellow-400">
+            {runs.filter((r) => r.status === 'pending').length} run
+            {runs.filter((r) => r.status === 'pending').length > 1 ? 's' : ''} awaiting manual
+            approval
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            {runs
+              .filter((r) => r.status === 'pending')
               .map((run) => (
-                <Link
+                <button
                   key={run.id}
-                  href={`/runs/${run.id}`}
-                  className="grid grid-cols-12 gap-4 px-4 py-3 hover:bg-zinc-800/40 transition-colors group items-center"
+                  onClick={() => approveRun.mutate(run.id)}
+                  disabled={approveRun.isPending}
+                  className="flex items-center gap-1 px-2 py-1 rounded bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/20 text-yellow-400 text-[11px] font-medium transition-colors"
                 >
-                  <div className="col-span-4 flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-md bg-zinc-800 border border-zinc-700 flex items-center justify-center flex-shrink-0">
-                      <Play size={11} className="text-zinc-500" />
-                    </div>
-                    <span className="text-xs font-mono text-zinc-400 group-hover:text-zinc-300 transition-colors truncate">
-                      {run.id.slice(0, 16)}...
-                    </span>
-                  </div>
-                  <div className="col-span-3">
-                    <RunStatusBadge status={run.status} />
-                  </div>
-                  <div className="col-span-3 flex items-center gap-1.5">
-                    <Clock size={10} className="text-zinc-600" />
-                    <span className="text-xs text-zinc-600">{formatDate(run.createdAt)}</span>
-                  </div>
-                  <div className="col-span-2 flex justify-end">
-                    <ArrowRight
-                      size={12}
-                      className="text-zinc-700 group-hover:text-zinc-500 transition-colors"
-                    />
-                  </div>
-                </Link>
+                  {approveRun.isPending ? (
+                    <Loader2 size={9} className="animate-spin" />
+                  ) : (
+                    <CheckCircle2 size={9} />
+                  )}
+                  Approve {run.id.slice(0, 8)}
+                </button>
               ))}
           </div>
         </div>
       )}
+
+      {/* Content */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Runs list — left panel like Postman history */}
+        <div className="w-72 border-r border-zinc-800/60 flex flex-col overflow-hidden flex-shrink-0">
+          <div className="px-3 py-2 border-b border-zinc-800/40 flex items-center justify-between">
+            <span className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
+              {filtered.length} run{filtered.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            {isLoading && (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 size={16} className="text-zinc-600 animate-spin" />
+              </div>
+            )}
+
+            {!isLoading && filtered.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+                <Play size={20} className="text-zinc-700 mb-3" />
+                <p className="text-xs text-zinc-600">No runs yet</p>
+                <p className="text-[11px] text-zinc-700 mt-1">Go to a scenario and click Run</p>
+              </div>
+            )}
+
+            {filtered.map((run) => (
+              <Link
+                key={run.id}
+                href={`/scenarios/${run.scenarioId}`}
+                className="flex items-center gap-3 px-3 py-3 border-b border-zinc-800/40 hover:bg-zinc-800/30 transition-colors group"
+              >
+                <StatusIcon status={run.status} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-mono text-zinc-400 group-hover:text-zinc-200 transition-colors truncate">
+                    {run.id.slice(0, 16)}...
+                  </p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <Clock size={9} className="text-zinc-700" />
+                    <span className="text-[10px] text-zinc-700">{formatDate(run.createdAt)}</span>
+                  </div>
+                </div>
+                <ChevronRight
+                  size={11}
+                  className="text-zinc-700 group-hover:text-zinc-500 flex-shrink-0"
+                />
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        {/* Right panel — run detail or empty state */}
+        <div className="flex-1 flex items-center justify-center overflow-hidden">
+          <div className="text-center">
+            <div className="w-16 h-16 rounded-2xl bg-zinc-800/50 border border-zinc-700/50 flex items-center justify-center mx-auto mb-4">
+              <Play size={24} className="text-zinc-600" />
+            </div>
+            <p className="text-sm font-medium text-zinc-400 mb-1">Select a run</p>
+            <p className="text-xs text-zinc-600 mb-6">Choose a run from the list to view details</p>
+            <div className="flex items-center gap-3 justify-center text-xs text-zinc-600">
+              <div className="flex items-center gap-1.5">
+                <CheckCircle2 size={11} className="text-green-400" />
+                <span>{runs.filter((r) => r.status === 'completed').length} completed</span>
+              </div>
+              <span>·</span>
+              <div className="flex items-center gap-1.5">
+                <Circle size={11} className="text-blue-400" />
+                <span>{runs.filter((r) => r.status === 'running').length} running</span>
+              </div>
+              <span>·</span>
+              <div className="flex items-center gap-1.5">
+                <XCircle size={11} className="text-red-400" />
+                <span>{runs.filter((r) => r.status === 'failed').length} failed</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
