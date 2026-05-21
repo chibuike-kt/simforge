@@ -26,7 +26,7 @@ export class AgentRuntime {
   private readonly rng: SeededRandom;
 
   constructor(
-    private readonly model: BehaviorModel,
+    private model: BehaviorModel,
     private readonly http: HttpAdapter,
     private readonly _rateLimiter: TokenBucket,
     private readonly emit: EventEmitter,
@@ -37,6 +37,41 @@ export class AgentRuntime {
     private readonly regionProfile?: RegionProfile,
   ) {
     this.rng = new SeededRandom(entropySeed);
+
+    // BullMQ serializes through Redis — JSONB fields may arrive as strings
+    if (typeof (this.model.nodes as unknown) === 'string') {
+      try {
+        this.model = {
+          ...this.model,
+          nodes: JSON.parse(this.model.nodes as unknown as string),
+        };
+        console.log(
+          '[AgentRuntime] Parsed model.nodes from string — keys:',
+          Object.keys(this.model.nodes),
+        );
+      } catch (e) {
+        console.error('[AgentRuntime] Failed to parse model.nodes:', e);
+      }
+    }
+
+    // Also handle case where nodes is nested under stateGraph
+    const modelAny = this.model as unknown as Record<string, unknown>;
+    if (!this.model.nodes && modelAny.stateGraph) {
+      const sg =
+        typeof modelAny.stateGraph === 'string'
+          ? JSON.parse(modelAny.stateGraph as string)
+          : (modelAny.stateGraph as Record<string, unknown>);
+      this.model = {
+        ...this.model,
+        nodes: sg.nodes as BehaviorModel['nodes'],
+        entryNodeId: (sg.entryNodeId as string) ?? this.model.entryNodeId,
+      };
+      console.log(
+        '[AgentRuntime] Extracted nodes from stateGraph — keys:',
+        Object.keys(this.model.nodes),
+      );
+    }
+
     this.state = {
       agentId: randomUUID(),
       runId,
@@ -59,110 +94,158 @@ export class AgentRuntime {
   }
 
   async run(): Promise<void> {
-    await this.emit(SimForgeEventType.AGENT_SPAWNED, {
-      agentId: this.state.agentId,
-      behaviorModelId: this.model.id,
-      entryNodeId: this.model.entryNodeId,
-      regionCode: this.regionProfile?.regionCode ?? null,
-      countryCode: this.regionProfile?.countryCode ?? null,
-      label: this.regionProfile?.label ?? null,
-    });
-
-    this.state.status = AgentStatus.ACTIVE;
-    let steps = 0;
-
-    while (this.state.status === AgentStatus.ACTIVE) {
-      if (++steps > MAX_STEPS) return this.fail('max_steps_exceeded');
-
-      const node = this.model.nodes[this.state.currentNodeId];
-      if (!node) return this.fail(`node_not_found:${this.state.currentNodeId}`);
-
-      if (node.type === 'abort') {
-        this.state.status = AgentStatus.COMPLETED;
-        await this.emit(SimForgeEventType.AGENT_COMPLETED, {
-          agentId: this.state.agentId,
-          finalNodeId: node.id,
-          steps,
-          regionCode: this.regionProfile?.regionCode ?? null,
-          countryCode: this.regionProfile?.countryCode ?? null,
-        });
-        return;
-      }
-
-      if (this.isLooping()) {
-        this.state.status = AgentStatus.LOOP_DETECTED;
-        await this.emit(SimForgeEventType.AGENT_LOOP_DETECTED, {
-          agentId: this.state.agentId,
-          nodeId: this.state.currentNodeId,
-          regionCode: this.regionProfile?.regionCode ?? null,
-        });
-        return;
-      }
-
-      const now = Date.now();
-      if (this.state.cooldownUntil > now) await sleep(this.state.cooldownUntil - now);
-
-      // Think time + region jitter
-      const think = this.sampleThinkTime(node);
-      const regionJitter = this.regionProfile
-        ? Math.round(this.rng.next() * this.regionProfile.jitterMs)
-        : 0;
-      if (think + regionJitter > 0) await sleep(think + regionJitter);
-
-      let result = null;
-
-      if (node.type === 'http' && node.action) {
-        result = await this.executeHttp(node, node.action as HttpAction, steps);
-      } else if (node.type === 'wait' && node.action) {
-        const w = node.action as WaitAction;
-        const jitter = (this.rng.next() * 2 - 1) * w.jitterMs;
-        await sleep(Math.max(0, w.durationMs + jitter));
-      }
-
-      if (node.cooldownMs > 0) this.state.cooldownUntil = Date.now() + node.cooldownMs;
-
-      const nextId = this.selectTransition(node, result);
-
-      if (!nextId) {
-        this.state.status = AgentStatus.COMPLETED;
-        await this.emit(SimForgeEventType.AGENT_COMPLETED, {
-          agentId: this.state.agentId,
-          steps,
-          regionCode: this.regionProfile?.regionCode ?? null,
-          countryCode: this.regionProfile?.countryCode ?? null,
-        });
-        return;
-      }
-
-      await this.emit(SimForgeEventType.AGENT_STATE_CHANGED, {
+    try {
+      await this.emit(SimForgeEventType.AGENT_SPAWNED, {
         agentId: this.state.agentId,
-        fromNodeId: this.state.currentNodeId,
-        toNodeId: nextId,
+        runId: this.runId,
+        behaviorModelId: this.model.id,
+        entryNodeId: this.model.entryNodeId,
         regionCode: this.regionProfile?.regionCode ?? null,
+        countryCode: this.regionProfile?.countryCode ?? null,
+        label: this.regionProfile?.label ?? null,
       });
 
-      this.pushHistory(this.state.currentNodeId);
-      this.state.currentNodeId = nextId;
-      this.state.retryCount = 0;
-      this.state.lastActiveAt = new Date().toISOString();
+      this.state.status = AgentStatus.ACTIVE;
+      let steps = 0;
+
+      // Validate model structure upfront
+      if (!this.model.nodes || typeof this.model.nodes !== 'object') {
+        console.error(
+          `[AgentRuntime] Invalid model.nodes for agent ${this.state.agentId}:`,
+          typeof this.model.nodes,
+          this.model.nodes,
+        );
+        return this.fail('invalid_model_nodes');
+      }
+
+      if (!this.model.entryNodeId) {
+        return this.fail('missing_entry_node_id');
+      }
+
+      const entryNode = this.model.nodes[this.model.entryNodeId];
+      if (!entryNode) {
+        console.error(
+          `[AgentRuntime] Entry node "${this.model.entryNodeId}" not found in nodes:`,
+          Object.keys(this.model.nodes),
+        );
+        return this.fail(`entry_node_not_found:${this.model.entryNodeId}`);
+      }
+
+      while (this.state.status === AgentStatus.ACTIVE) {
+        if (++steps > MAX_STEPS) return this.fail('max_steps_exceeded');
+
+        const node = this.model.nodes[this.state.currentNodeId];
+        if (!node) {
+          console.error(
+            `[AgentRuntime] Node "${this.state.currentNodeId}" not found. Available:`,
+            Object.keys(this.model.nodes),
+          );
+          return this.fail(`node_not_found:${this.state.currentNodeId}`);
+        }
+
+        if (node.type === 'abort') {
+          this.state.status = AgentStatus.COMPLETED;
+          await this.emit(SimForgeEventType.AGENT_COMPLETED, {
+            agentId: this.state.agentId,
+            runId: this.runId,
+            finalNodeId: node.id,
+            steps,
+            regionCode: this.regionProfile?.regionCode ?? null,
+            countryCode: this.regionProfile?.countryCode ?? null,
+          });
+          return;
+        }
+
+        if (this.isLooping()) {
+          this.state.status = AgentStatus.LOOP_DETECTED;
+          await this.emit(SimForgeEventType.AGENT_LOOP_DETECTED, {
+            agentId: this.state.agentId,
+            runId: this.runId,
+            nodeId: this.state.currentNodeId,
+            regionCode: this.regionProfile?.regionCode ?? null,
+          });
+          return;
+        }
+
+        const now = Date.now();
+        if (this.state.cooldownUntil > now) await sleep(this.state.cooldownUntil - now);
+
+        // Think time + region jitter
+        const think = this.sampleThinkTime(node);
+        const regionJitter = this.regionProfile
+          ? Math.round(this.rng.next() * this.regionProfile.jitterMs)
+          : 0;
+        if (think + regionJitter > 0) await sleep(think + regionJitter);
+
+        let result: {
+          statusCode: number;
+          latencyMs: number;
+          bodyHash: string | null;
+          bodyRaw: string | null;
+          error: string | null;
+        } | null = null;
+
+        if (node.type === 'http' && node.action) {
+          result = await this.executeHttp(node, node.action as HttpAction, steps);
+        } else if (node.type === 'wait' && node.action) {
+          const w = node.action as WaitAction;
+          const jitter = (this.rng.next() * 2 - 1) * w.jitterMs;
+          await sleep(Math.max(0, w.durationMs + jitter));
+        }
+
+        if (node.cooldownMs > 0) this.state.cooldownUntil = Date.now() + node.cooldownMs;
+
+        const nextId = this.selectTransition(node, result);
+
+        if (!nextId) {
+          this.state.status = AgentStatus.COMPLETED;
+          await this.emit(SimForgeEventType.AGENT_COMPLETED, {
+            agentId: this.state.agentId,
+            runId: this.runId,
+            steps,
+            regionCode: this.regionProfile?.regionCode ?? null,
+            countryCode: this.regionProfile?.countryCode ?? null,
+          });
+          return;
+        }
+
+        await this.emit(SimForgeEventType.AGENT_STATE_CHANGED, {
+          agentId: this.state.agentId,
+          runId: this.runId,
+          fromNodeId: this.state.currentNodeId,
+          toNodeId: nextId,
+          regionCode: this.regionProfile?.regionCode ?? null,
+        });
+
+        this.pushHistory(this.state.currentNodeId);
+        this.state.currentNodeId = nextId;
+        this.state.retryCount = 0;
+        this.state.lastActiveAt = new Date().toISOString();
+      }
+    } catch (err) {
+      console.error(
+        `[AgentRuntime] Uncaught error in agent ${this.state.agentId}:`,
+        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.stack?.split('\n').slice(1, 4).join(' | ') : '',
+      );
+      return this.fail(`uncaught:${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   private async executeHttp(node: BehaviorNode, action: HttpAction, stepIndex: number) {
     await this.emit(SimForgeEventType.ACTION_EXECUTED, {
       agentId: this.state.agentId,
+      runId: this.runId,
       nodeId: node.id,
       method: action.method,
       regionCode: this.regionProfile?.regionCode ?? null,
       countryCode: this.regionProfile?.countryCode ?? null,
     });
 
-    // Region-specific headers + user agent
     const regionHeaders = this.regionProfile
       ? applyRegionProfile(this.regionProfile, this.rng)
       : {};
 
-    // Extract rules from node metadata
     const nodeExtra = node as unknown as Record<string, unknown>;
     const extractRules = nodeExtra.extractRules as Record<string, string> | undefined;
 
@@ -191,6 +274,7 @@ export class AgentRuntime {
       if (this.state.retryCount > node.maxRetries || !shouldRetry) {
         await this.emit(SimForgeEventType.ACTION_DLQ_SENT, {
           agentId: this.state.agentId,
+          runId: this.runId,
           nodeId: node.id,
           error: packetLost ? 'packet_loss' : result.error,
           regionCode: this.regionProfile?.regionCode ?? null,
@@ -199,17 +283,18 @@ export class AgentRuntime {
       } else {
         await this.emit(SimForgeEventType.ACTION_RETRIED, {
           agentId: this.state.agentId,
+          runId: this.runId,
           nodeId: node.id,
           retryCount: this.state.retryCount,
           regionCode: this.regionProfile?.regionCode ?? null,
         });
       }
     } else {
-      // Add region latency on top of actual latency
       const regionLatency = this.regionProfile ? this.sampleRegionLatency() : 0;
 
       await this.emit(SimForgeEventType.RESPONSE_RECEIVED, {
         agentId: this.state.agentId,
+        runId: this.runId,
         statusCode: result.statusCode,
         latencyMs: result.latencyMs + regionLatency,
         actualLatencyMs: result.latencyMs,
@@ -239,7 +324,7 @@ export class AgentRuntime {
     node: BehaviorNode,
     result: { statusCode: number } | null,
   ): string | null {
-    if (!node.transitions.length) return null;
+    if (!node.transitions || !node.transitions.length) return null;
 
     const valid = node.transitions.filter((t) => {
       if (!t.guard) return true;
@@ -281,8 +366,8 @@ export class AgentRuntime {
   private sampleThinkTime(node: BehaviorNode): number {
     const { meanMs, stdDevMs } = node.thinkTimeMs;
     if (!meanMs) return 0;
-    const u1 = this.rng.next();
-    const u2 = this.rng.next();
+    const u1 = Math.max(0.0001, this.rng.next());
+    const u2 = Math.max(0.0001, this.rng.next());
     const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
     return Math.max(0, Math.round(meanMs + z * stdDevMs));
   }
@@ -291,6 +376,7 @@ export class AgentRuntime {
     this.state.status = AgentStatus.FAILED;
     await this.emit(SimForgeEventType.AGENT_FAILED, {
       agentId: this.state.agentId,
+      runId: this.runId,
       reason,
       nodeId: this.state.currentNodeId,
       regionCode: this.regionProfile?.regionCode ?? null,

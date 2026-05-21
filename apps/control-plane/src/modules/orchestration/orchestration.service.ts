@@ -39,11 +39,24 @@ export class OrchestrationService {
     if (!scenario) throw new BadRequestException(`Scenario not found`);
 
     const target = await this.targetService.findById(scenario.targetSystemId);
-    const behaviorModel = await this.behaviorService.findById(
+    const behaviorRaw = await this.behaviorService.findById(
       scenario.behaviorModelId,
     );
-    if (!behaviorModel)
-      throw new BadRequestException(`Behavior model not found`);
+    if (!behaviorRaw) throw new BadRequestException(`Behavior model not found`);
+
+    // stateGraph is JSONB — may come back as object or string
+    const stateGraph =
+      typeof behaviorRaw.stateGraph === 'string'
+        ? JSON.parse(behaviorRaw.stateGraph)
+        : behaviorRaw.stateGraph;
+
+    const behaviorModel = {
+      id: behaviorRaw.id,
+      version: behaviorRaw.version,
+      name: behaviorRaw.name,
+      entryNodeId: stateGraph.entryNodeId ?? behaviorRaw.entryNodeId,
+      nodes: stateGraph.nodes ?? stateGraph,
+    };
 
     const totalAgents = this.computeMaxAgents(
       scenario.trafficPattern as TrafficPatternConfig,

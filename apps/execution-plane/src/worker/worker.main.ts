@@ -24,6 +24,7 @@ const env = z
     GLOBAL_RPS_CAP: z.coerce.number().default(500),
     CIRCUIT_ERROR_RATE_THRESHOLD: z.coerce.number().default(0.8),
     CIRCUIT_WINDOW_MS: z.coerce.number().default(30_000),
+    CONTROL_PLANE_URL: z.string().default('http://localhost:4000'),
   })
   .parse(process.env);
 
@@ -79,9 +80,7 @@ async function emit(type: SimForgeEventType, payload: object): Promise<void> {
   };
   const runId = (payload as Record<string, string>).runId;
   if (runId) {
-    // Publish to run-specific channel for WebSocket streaming
     await redis.publish(`sf:pubsub:run:${runId}`, JSON.stringify(event));
-    // Also publish to global channel for dashboard overview
     await redis.publish(`sf:pubsub:global`, JSON.stringify(event));
   }
   if (env.WORKER_REGION === 'local') {
@@ -89,7 +88,7 @@ async function emit(type: SimForgeEventType, payload: object): Promise<void> {
   }
 }
 
-// ─── Metrics Accumulator ──────────────────────────────────────────────────────
+// ─── Metrics ──────────────────────────────────────────────────────────────────
 
 interface ShardMetrics {
   totalRequests: number;
@@ -107,17 +106,32 @@ interface ShardMetrics {
 
 function computePercentile(sorted: number[], pct: number): number {
   if (sorted.length === 0) return 0;
-  const idx = Math.floor(sorted.length * pct);
-  return sorted[Math.min(idx, sorted.length - 1)];
+  const idx = Math.min(Math.floor(sorted.length * pct), sorted.length - 1);
+  return sorted[idx];
 }
 
-async function postMetrics(metrics: ShardMetrics & {
-  runId: string;
-  shardId: string;
-  totalAgents: number;
-  durationMs: number;
-}): Promise<void> {
+function buildHistogram(sorted: number[]): { bucket: number; count: number }[] {
+  const buckets = [10, 25, 50, 100, 200, 500, 1000, 2000, 5000];
+  const result: { bucket: number; count: number }[] = [];
+  let prev = 0;
+  for (const bucket of buckets) {
+    const count = sorted.filter((v) => v > prev && v <= bucket).length;
+    result.push({ bucket, count });
+    prev = bucket;
+  }
+  return result;
+}
+
+async function postMetrics(
+  metrics: ShardMetrics & {
+    runId: string;
+    shardId: string;
+    totalAgents: number;
+    durationMs: number;
+  },
+): Promise<void> {
   const sorted = [...metrics.latencies].sort((a, b) => a - b);
+
   const payload = {
     runId: metrics.runId,
     shardId: metrics.shardId,
@@ -127,7 +141,7 @@ async function postMetrics(metrics: ShardMetrics & {
     completedAgents: metrics.completedAgents,
     failedAgents: metrics.failedAgents,
     durationMs: metrics.durationMs,
-    peakRps: Math.max(...metrics.rpsWindows, 0),
+    peakRps: metrics.rpsWindows.length > 0 ? Math.max(...metrics.rpsWindows) : 0,
     p50Ms: computePercentile(sorted, 0.5),
     p95Ms: computePercentile(sorted, 0.95),
     p99Ms: computePercentile(sorted, 0.99),
@@ -140,27 +154,39 @@ async function postMetrics(metrics: ShardMetrics & {
     completedAt: new Date().toISOString(),
   };
 
+  console.log(
+    '[Metrics] Posting shard metrics:',
+    JSON.stringify({
+      runId: payload.runId,
+      totalRequests: payload.totalRequests,
+      totalErrors: payload.totalErrors,
+      completedAgents: payload.completedAgents,
+      failedAgents: payload.failedAgents,
+      p50Ms: payload.p50Ms,
+      p95Ms: payload.p95Ms,
+      peakRps: payload.peakRps,
+    }),
+  );
+
   try {
-    await fetch('http://localhost:4000/api/metrics/shards', {
+    const res = await fetch(`${env.CONTROL_PLANE_URL}/api/metrics/shards`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-  } catch (err) {
-    console.error('[Metrics] Failed to post shard metrics:', err);
-  }
-}
 
-function buildHistogram(sorted: number[]): { bucket: number; count: number }[] {
-  const buckets = [10, 25, 50, 100, 200, 500, 1000, 2000, 5000];
-  const histogram: { bucket: number; count: number }[] = [];
-  let prev = 0;
-  for (const bucket of buckets) {
-    const count = sorted.filter((v) => v > prev && v <= bucket).length;
-    histogram.push({ bucket, count });
-    prev = bucket;
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(`[Metrics] POST failed ${res.status}:`, text);
+    } else {
+      console.log('[Metrics] Shard metrics posted successfully');
+    }
+  } catch (err) {
+    console.error(
+      '[Metrics] Failed to reach control plane:',
+      err instanceof Error ? err.message : err,
+    );
   }
-  return histogram;
 }
 
 // ─── Job Processor ────────────────────────────────────────────────────────────
@@ -171,11 +197,13 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
 
   console.log(`[Worker:${env.WORKER_ID}] run=${runId} shard=${shardId}`);
 
+  // 1. Verify signature
   const check = verifyJobEnvelope(envelope, env.JOB_SIGNING_SECRET);
   if (!check.valid) {
     throw Object.assign(new Error(`Invalid envelope: ${check.reason}`), { noRetry: true });
   }
 
+  // 2. Idempotency lock
   const lockKey = `sf:shard:lock:${runId}:${shardId}`;
   const acquired = await redis.set(lockKey, env.WORKER_ID, 'EX', 3600, 'NX');
   if (!acquired) {
@@ -183,17 +211,19 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
     return;
   }
 
+  // 3. Circuit check
   const circuit = circuits.get(shardId);
   if (circuit?.open) {
     await emit(SimForgeEventType.SHARD_FAILED, { runId, shardId, reason: 'circuit_open' });
     return;
   }
 
+  // 4. Staggered start
   if (envelope.timingConfig.startOffsetMs > 0) {
     await sleep(envelope.timingConfig.startOffsetMs);
   }
 
-  // ── Metrics accumulator ──
+  // 5. Init metrics accumulator
   const shardMetrics: ShardMetrics = {
     totalRequests: 0,
     totalErrors: 0,
@@ -208,14 +238,16 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
     startedAt: new Date().toISOString(),
   };
 
-  // RPS tracking window
+  // RPS tracking
   const rpsWindow: number[] = [];
   const rpsInterval = setInterval(() => {
     const now = Date.now();
-    const windowRequests = rpsWindow.filter((t) => now - t < 1000).length;
-    shardMetrics.rpsWindows.push(windowRequests);
-    // Clean old entries
-    while (rpsWindow.length > 0 && now - rpsWindow[0] > 2000) rpsWindow.shift();
+    const count = rpsWindow.filter((t) => now - t < 1000).length;
+    shardMetrics.rpsWindows.push(count);
+    // Prune old entries
+    let i = 0;
+    while (i < rpsWindow.length && now - rpsWindow[i] > 2000) i++;
+    rpsWindow.splice(0, i);
   }, 1000);
 
   await emit(SimForgeEventType.SHARD_STARTED, {
@@ -224,6 +256,7 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
     agentCount: envelope.agentCount,
   });
 
+  // 6. Shared shard resources
   const effectiveRps = Math.min(envelope.targetConfig.maxRps, env.GLOBAL_RPS_CAP);
   const rateLimiter = new TokenBucket(effectiveRps);
   const httpAdapter = new HttpAdapter(
@@ -236,7 +269,6 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
   let completed = 0;
   let failed = 0;
   const parentSeed = hashStr(runId + shardId);
-  const shardRng = new SeededRandom(parentSeed);
   const batch: Promise<void>[] = [];
 
   const regionDistribution = (envelope as unknown as Record<string, unknown>).regionDistribution as
@@ -247,48 +279,58 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
   const metricsEmit = async (type: SimForgeEventType, payload: object): Promise<void> => {
     const p = payload as Record<string, unknown>;
 
-    if (type === SimForgeEventType.RESPONSE_RECEIVED) {
-      shardMetrics.totalRequests++;
-      rpsWindow.push(Date.now());
+    switch (type) {
+      case SimForgeEventType.RESPONSE_RECEIVED: {
+        shardMetrics.totalRequests++;
+        rpsWindow.push(Date.now());
 
-      if (typeof p.latencyMs === 'number') {
-        shardMetrics.latencies.push(p.latencyMs);
+        if (typeof p.latencyMs === 'number') {
+          shardMetrics.latencies.push(p.latencyMs);
+        }
+        if (typeof p.statusCode === 'number') {
+          const code = String(p.statusCode);
+          shardMetrics.statusBreakdown[code] = (shardMetrics.statusBreakdown[code] ?? 0) + 1;
+        }
+        if (typeof p.regionCode === 'string' && p.regionCode) {
+          shardMetrics.regionBreakdown[p.regionCode] =
+            (shardMetrics.regionBreakdown[p.regionCode] ?? 0) + 1;
+        }
+        if (typeof p.countryCode === 'string' && p.countryCode) {
+          shardMetrics.countryBreakdown[p.countryCode] =
+            (shardMetrics.countryBreakdown[p.countryCode] ?? 0) + 1;
+        }
+        break;
       }
-      if (typeof p.statusCode === 'number') {
-        const code = String(p.statusCode);
-        shardMetrics.statusBreakdown[code] = (shardMetrics.statusBreakdown[code] ?? 0) + 1;
+
+      case SimForgeEventType.ACTION_DLQ_SENT: {
+        shardMetrics.totalErrors++;
+        const errorKey = String(p.error ?? 'unknown');
+        const existing = shardMetrics.errorSamples.find((e) => e.error === errorKey);
+        if (existing) {
+          existing.count++;
+        } else {
+          shardMetrics.errorSamples.push({
+            error: errorKey,
+            count: 1,
+            regionCode: typeof p.regionCode === 'string' ? p.regionCode : undefined,
+          });
+        }
+        break;
       }
-      if (typeof p.regionCode === 'string') {
-        shardMetrics.regionBreakdown[p.regionCode] =
-          (shardMetrics.regionBreakdown[p.regionCode] ?? 0) + 1;
-      }
-      if (typeof p.countryCode === 'string') {
-        shardMetrics.countryBreakdown[p.countryCode] =
-          (shardMetrics.countryBreakdown[p.countryCode] ?? 0) + 1;
-      }
+
+      case SimForgeEventType.AGENT_COMPLETED:
+        shardMetrics.completedAgents++;
+        break;
+
+      case SimForgeEventType.AGENT_FAILED:
+        shardMetrics.failedAgents++;
+        break;
     }
-
-    if (type === SimForgeEventType.ACTION_DLQ_SENT) {
-      shardMetrics.totalErrors++;
-      const errorKey = String(p.error ?? 'unknown');
-      const existing = shardMetrics.errorSamples.find((e) => e.error === errorKey);
-      if (existing) {
-        existing.count++;
-      } else {
-        shardMetrics.errorSamples.push({
-          error: errorKey,
-          count: 1,
-          regionCode: typeof p.regionCode === 'string' ? p.regionCode : undefined,
-        });
-      }
-    }
-
-    if (type === SimForgeEventType.AGENT_COMPLETED) shardMetrics.completedAgents++;
-    if (type === SimForgeEventType.AGENT_FAILED) shardMetrics.failedAgents++;
 
     await emit(type, payload);
   };
 
+  // 7. Spawn agents
   for (let i = 0; i < envelope.agentCount; i++) {
     const agentSeed = SeededRandom.childSeed(parentSeed, i);
     const agentRng = new SeededRandom(agentSeed);
@@ -332,7 +374,14 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
 
   const durationMs = Date.now() - startMs;
 
-  // Post metrics to control plane
+  console.log(
+    `[Worker:${env.WORKER_ID}] Shard ${shardId} complete — ` +
+      `requests=${shardMetrics.totalRequests} errors=${shardMetrics.totalErrors} ` +
+      `agents_ok=${shardMetrics.completedAgents} agents_fail=${shardMetrics.failedAgents} ` +
+      `duration=${durationMs}ms`,
+  );
+
+  // 8. Post metrics to control plane
   await postMetrics({
     ...shardMetrics,
     runId,
@@ -398,13 +447,20 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch(console.error);
+(main().catch((err: Error) => {
+  failed++;
+  recordResult(shardId, true);
+  console.error(
+    `[Agent] ${agent.agentId} FAILED:`,
+    err.message,
+    err.stack?.split('\n').slice(0, 3).join(' | '),
+  );
+}),
+  // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+  function sleep(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+  });
 
 function hashStr(s: string): number {
   let h = 0;

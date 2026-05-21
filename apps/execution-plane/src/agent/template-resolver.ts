@@ -1,13 +1,11 @@
-import { Faker, allFakers } from '@faker-js/faker';
+import { Faker, en } from '@faker-js/faker';
 import { SeededRandom } from './seeded-random';
 
-// Build a seeded faker instance from the agent's RNG
 function buildFaker(rng: SeededRandom): Faker {
-  // Use the agent's next random value as faker seed for determinism
   const seed = Math.floor(rng.next() * 2_147_483_647);
-  const faker = new Faker({ locale: allFakers.en.definition });
-  faker.seed(seed);
-  return faker;
+  const instance = new Faker({ locale: [en] });
+  instance.seed(seed);
+  return instance;
 }
 
 // All supported template variables
