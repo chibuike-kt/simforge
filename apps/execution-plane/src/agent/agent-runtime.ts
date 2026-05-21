@@ -10,7 +10,7 @@ import {
   WaitAction,
 } from '@simforge/shared';
 
-import { HttpAdapter, HttpResult } from '../adapters/http/http.adapter';
+import { HttpAdapter } from '../adapters/http/http.adapter';
 import { TokenBucket } from '../worker/token-bucket';
 import { SeededRandom } from './seeded-random';
 import { RegionProfile, applyRegionProfile } from './region-profile';
@@ -102,17 +102,17 @@ export class AgentRuntime {
       const now = Date.now();
       if (this.state.cooldownUntil > now) await sleep(this.state.cooldownUntil - now);
 
-      // Apply region-specific think time jitter on top of node think time
+      // Think time + region jitter
       const think = this.sampleThinkTime(node);
       const regionJitter = this.regionProfile
         ? Math.round(this.rng.next() * this.regionProfile.jitterMs)
         : 0;
       if (think + regionJitter > 0) await sleep(think + regionJitter);
 
-      let result: HttpResult | null = null;
+      let result = null;
 
       if (node.type === 'http' && node.action) {
-        result = await this.executeHttp(node, node.action as HttpAction);
+        result = await this.executeHttp(node, node.action as HttpAction, steps);
       } else if (node.type === 'wait' && node.action) {
         const w = node.action as WaitAction;
         const jitter = (this.rng.next() * 2 - 1) * w.jitterMs;
@@ -148,7 +148,7 @@ export class AgentRuntime {
     }
   }
 
-  private async executeHttp(node: BehaviorNode, action: HttpAction): Promise<HttpResult> {
+  private async executeHttp(node: BehaviorNode, action: HttpAction, stepIndex: number) {
     await this.emit(SimForgeEventType.ACTION_EXECUTED, {
       agentId: this.state.agentId,
       nodeId: node.id,
@@ -157,17 +157,26 @@ export class AgentRuntime {
       countryCode: this.regionProfile?.countryCode ?? null,
     });
 
-    // Apply region-specific headers and user agent
+    // Region-specific headers + user agent
     const regionHeaders = this.regionProfile
       ? applyRegionProfile(this.regionProfile, this.rng)
       : {};
+
+    // Extract rules from node metadata
+    const nodeExtra = node as unknown as Record<string, unknown>;
+    const extractRules = nodeExtra.extractRules as Record<string, string> | undefined;
 
     const result = await this.http.execute(
       { ...action, headers: { ...action.headers, ...regionHeaders } },
       {
         sessionToken: this.state.sessionToken,
         agentId: this.state.agentId,
-        ...this.state.customKv,
+        regionCode: this.regionProfile?.regionCode,
+        countryCode: this.regionProfile?.countryCode,
+        rng: this.rng,
+        stepIndex,
+        extractRules,
+        customKv: this.state.customKv as Record<string, unknown>,
       },
     );
 
@@ -177,7 +186,6 @@ export class AgentRuntime {
     if (result.error || packetLost) {
       this.state.retryCount++;
 
-      // Region-specific retry rate check
       const shouldRetry = !this.regionProfile || this.rng.next() < this.regionProfile.retryRate;
 
       if (this.state.retryCount > node.maxRetries || !shouldRetry) {
@@ -208,6 +216,7 @@ export class AgentRuntime {
         regionLatencyMs: regionLatency,
         nodeId: node.id,
         bodyHash: result.bodyHash,
+        bodyRaw: result.bodyRaw,
         regionCode: this.regionProfile?.regionCode ?? null,
         countryCode: this.regionProfile?.countryCode ?? null,
       });
@@ -226,7 +235,10 @@ export class AgentRuntime {
     return Math.max(0, Math.round(base + (this.rng.next() - 0.5) * jitterMs));
   }
 
-  private selectTransition(node: BehaviorNode, result: HttpResult | null): string | null {
+  private selectTransition(
+    node: BehaviorNode,
+    result: { statusCode: number } | null,
+  ): string | null {
     if (!node.transitions.length) return null;
 
     const valid = node.transitions.filter((t) => {
