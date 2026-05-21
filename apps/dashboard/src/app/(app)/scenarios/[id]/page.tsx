@@ -2,20 +2,9 @@
 
 import { use, useState } from 'react';
 import {
-  Play,
-  Square,
-  Settings,
-  Globe,
-  GitBranch,
-  ChevronDown,
-  Loader2,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Zap,
-  Activity,
-  AlertTriangle,
-  Users,
+  Play, Square, Loader2, CheckCircle2, XCircle,
+  Clock, Zap, Activity, Users, ChevronDown,
+  Code, Globe, GitBranch, Settings2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { WorldMap } from '@/components/simulation/world-map';
@@ -27,21 +16,21 @@ import { formatNumber, formatMs, formatDate } from '@/lib/utils';
 import { MetricPoint } from '@/types';
 import { toast } from 'sonner';
 
-const TABS = ['Overview', 'Traffic', 'Regions', 'Behavior', 'Headers'] as const;
-type Tab = (typeof TABS)[number];
+type Tab = 'config' | 'regions' | 'headers' | 'body';
+type ResultTab = 'map' | 'metrics' | 'latency';
 
 const REGION_PROFILES = [
-  { code: 'EU_WEST',      label: 'Western Europe',    pct: 22, p50: 18,  mobile: 45, flag: '🇪🇺' },
-  { code: 'NA_WEST',      label: 'N. America West',   pct: 18, p50: 25,  mobile: 38, flag: '🇺🇸' },
-  { code: 'NA_EAST',      label: 'N. America East',   pct: 15, p50: 20,  mobile: 40, flag: '🇺🇸' },
-  { code: 'ASIA_EAST',    label: 'East Asia',          pct: 12, p50: 15,  mobile: 55, flag: '🌏' },
-  { code: 'ASIA_SOUTH',   label: 'South Asia',         pct: 10, p50: 80,  mobile: 78, flag: '🇮🇳' },
-  { code: 'EU_EAST',      label: 'Eastern Europe',     pct: 8,  p50: 35,  mobile: 52, flag: '🇵🇱' },
-  { code: 'ASIA_SE',      label: 'Southeast Asia',     pct: 9,  p50: 65,  mobile: 72, flag: '🌏' },
-  { code: 'LATAM',        label: 'Latin America',      pct: 6,  p50: 70,  mobile: 68, flag: '🌎' },
-  { code: 'ASIA_CENTRAL', label: 'Middle East',        pct: 5,  p50: 55,  mobile: 65, flag: '🌍' },
-  { code: 'AFRICA',       label: 'Africa',             pct: 4,  p50: 120, mobile: 82, flag: '🌍' },
-  { code: 'OCEANIA',      label: 'Oceania',            pct: 3,  p50: 30,  mobile: 48, flag: '🇦🇺' },
+  { code: 'EU_WEST',      label: 'Western Europe',   pct: 22, p50: 18,  mobile: 45 },
+  { code: 'NA_WEST',      label: 'N. America West',  pct: 18, p50: 25,  mobile: 38 },
+  { code: 'NA_EAST',      label: 'N. America East',  pct: 15, p50: 20,  mobile: 40 },
+  { code: 'ASIA_EAST',    label: 'East Asia',         pct: 12, p50: 15,  mobile: 55 },
+  { code: 'ASIA_SOUTH',   label: 'South Asia',        pct: 10, p50: 80,  mobile: 78 },
+  { code: 'EU_EAST',      label: 'Eastern Europe',    pct: 8,  p50: 35,  mobile: 52 },
+  { code: 'ASIA_SE',      label: 'Southeast Asia',    pct: 9,  p50: 65,  mobile: 72 },
+  { code: 'LATAM',        label: 'Latin America',     pct: 6,  p50: 70,  mobile: 68 },
+  { code: 'ASIA_CENTRAL', label: 'Middle East',       pct: 5,  p50: 55,  mobile: 65 },
+  { code: 'AFRICA',       label: 'Africa',            pct: 4,  p50: 120, mobile: 82 },
+  { code: 'OCEANIA',      label: 'Oceania',           pct: 3,  p50: 30,  mobile: 48 },
 ];
 
 function generateEmpty(n: number): MetricPoint[] {
@@ -55,12 +44,14 @@ function generateEmpty(n: number): MetricPoint[] {
 
 export default function ScenarioPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [activeTab, setActiveTab] = useState<Tab>('Overview');
+  const [tab, setTab] = useState<Tab>('config');
+  const [resultTab, setResultTab] = useState<ResultTab>('map');
   const [runMode, setRunMode] = useState<'idle' | 'running' | 'done'>('idle');
   const [metricsHistory, setMetricsHistory] = useState<MetricPoint[]>(() => generateEmpty(40));
 
   const { data: scenario, isLoading } = useScenario(id);
   const submitRun = useSubmitRun();
+  const sc = scenario as Record<string, unknown> | null;
 
   const { metrics, resetMetrics } = useRealtime({
     enabled: runMode === 'running',
@@ -97,18 +88,16 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
     try {
       resetMetrics();
       setMetricsHistory(generateEmpty(40));
-      await submitRun.mutateAsync(id);
       setRunMode('running');
+      setResultTab('map');
+      await submitRun.mutateAsync(id);
       toast.success('Simulation started');
     } catch (err) {
+      setRunMode('idle');
       toast.error('Failed to start', {
         description: err instanceof Error ? err.message : 'Unknown error',
       });
     }
-  }
-
-  function handleStop() {
-    setRunMode('done');
   }
 
   if (isLoading) {
@@ -119,258 +108,396 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
     );
   }
 
-  const sc = scenario as Record<string, unknown> | null;
+  const trafficPattern = sc?.trafficPattern as Record<string, unknown> | undefined;
 
   return (
-    <div className="h-full flex overflow-hidden">
-      {/* ── LEFT PANEL — config ──────────────────────────────── */}
-      <div className="w-80 flex-shrink-0 border-r border-zinc-800/60 flex flex-col overflow-hidden">
-        {/* Scenario header */}
-        <div className="px-4 py-3 border-b border-zinc-800/60">
-          <div className="flex items-center justify-between mb-1">
-            <h2 className="text-sm font-semibold text-white truncate">
-              {(sc?.name as string) ?? 'Loading...'}
-            </h2>
-            <span className={cn(
-              'text-[10px] font-medium px-1.5 py-0.5 rounded border flex-shrink-0',
-              sc?.status === 'published'
-                ? 'bg-green-400/10 text-green-400 border-green-400/20'
-                : 'bg-zinc-700/10 text-zinc-500 border-zinc-700/20',
-            )}>
-              {(sc?.status as string) ?? 'draft'}
-            </span>
+    <div className="h-full flex flex-col overflow-hidden bg-[#0f0f0f]">
+
+      {/* ── POSTMAN-STYLE URL BAR ─────────────────────────────── */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/60 bg-[#1a1a1a] flex-shrink-0">
+        {/* Method badge */}
+        <div className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-zinc-800 border border-zinc-700 text-xs font-semibold text-orange-400 flex-shrink-0">
+          SIM
+          <ChevronDown size={10} className="text-zinc-500 ml-1" />
+        </div>
+
+        {/* "URL" — scenario target */}
+        <div className="flex-1 flex items-center gap-2 px-3 py-1.5 rounded bg-zinc-800/50 border border-zinc-700/50 hover:border-zinc-600 transition-colors">
+          <Globe size={11} className="text-zinc-500 flex-shrink-0" />
+          <span className="text-sm text-zinc-300 font-mono truncate">
+            {(sc?.name as string) ?? 'Loading scenario...'}
+          </span>
+          <span className={cn(
+            'ml-auto text-[10px] font-medium px-1.5 py-0.5 rounded border flex-shrink-0',
+            sc?.status === 'published'
+              ? 'bg-green-400/10 text-green-400 border-green-400/20'
+              : 'bg-zinc-700/10 text-zinc-500 border-zinc-700/20',
+          )}>
+            {(sc?.status as string) ?? 'draft'}
+          </span>
+        </div>
+
+        {/* Run / Stop button */}
+        {runMode === 'idle' && (
+          <button
+            onClick={handleRun}
+            disabled={submitRun.isPending || sc?.status !== 'published'}
+            className="flex items-center gap-2 px-4 py-1.5 rounded bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors flex-shrink-0"
+          >
+            {submitRun.isPending
+              ? <Loader2 size={13} className="animate-spin" />
+              : <Play size={13} />}
+            Run
+          </button>
+        )}
+        {runMode === 'running' && (
+          <button
+            onClick={() => setRunMode('done')}
+            className="flex items-center gap-2 px-4 py-1.5 rounded bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-400 text-sm font-medium transition-colors flex-shrink-0"
+          >
+            <Square size={13} />
+            Stop
+          </button>
+        )}
+        {runMode === 'done' && (
+          <button
+            onClick={() => { setRunMode('idle'); resetMetrics(); setMetricsHistory(generateEmpty(40)); }}
+            className="flex items-center gap-2 px-4 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors flex-shrink-0"
+          >
+            <Play size={13} />
+            Run Again
+          </button>
+        )}
+      </div>
+
+      {/* ── SPLIT CONTENT ────────────────────────────────────── */}
+      <div className="flex-1 flex overflow-hidden">
+
+        {/* ── LEFT — request config (like Postman request panel) */}
+        <div className="w-[420px] flex-shrink-0 flex flex-col border-r border-zinc-800/60 overflow-hidden">
+
+          {/* Tabs — like Postman's Params/Auth/Headers/Body tabs */}
+          <div className="flex border-b border-zinc-800/60 bg-[#1a1a1a] flex-shrink-0">
+            {([
+              { key: 'config',  label: 'Config',   icon: <Settings2 size={11} /> },
+              { key: 'regions', label: 'Regions',   icon: <Globe size={11} /> },
+              { key: 'headers', label: 'Headers',   icon: <Code size={11} /> },
+              { key: 'body',    label: 'Behavior',  icon: <GitBranch size={11} /> },
+            ] as { key: Tab; label: string; icon: React.ReactNode }[]).map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-2.5 text-xs transition-colors border-b-2 whitespace-nowrap',
+                  tab === t.key
+                    ? 'text-white border-blue-500 bg-[#0f0f0f]'
+                    : 'text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-zinc-800/30',
+                )}
+              >
+                {t.icon}
+                {t.label}
+              </button>
+            ))}
           </div>
-          {sc?.description && (
-            <p className="text-[11px] text-zinc-500 truncate">{sc.description as string}</p>
-          )}
-        </div>
 
-        {/* Run button */}
-        <div className="px-4 py-3 border-b border-zinc-800/60">
-          {runMode === 'idle' && (
-            <button
-              onClick={handleRun}
-              disabled={submitRun.isPending || sc?.status !== 'published'}
-              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
-            >
-              {submitRun.isPending ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Play size={14} />
-              )}
-              {submitRun.isPending ? 'Starting...' : 'Run Simulation'}
-            </button>
-          )}
-          {runMode === 'running' && (
-            <button
-              onClick={handleStop}
-              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-400 text-sm font-medium transition-colors"
-            >
-              <Square size={14} />
-              Stop Simulation
-            </button>
-          )}
-          {runMode === 'done' && (
-            <button
-              onClick={() => { setRunMode('idle'); resetMetrics(); setMetricsHistory(generateEmpty(40)); }}
-              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
-            >
-              <Play size={14} />
-              Run Again
-            </button>
-          )}
+          {/* Tab body — scrollable */}
+          <div className="flex-1 overflow-y-auto">
 
-          {/* Status indicator */}
-          {runMode === 'running' && (
-            <div className="flex items-center gap-2 mt-2">
-              <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-              <span className="text-[11px] text-green-400">Simulation running</span>
-            </div>
-          )}
-          {runMode === 'done' && (
-            <div className="flex items-center gap-2 mt-2">
-              <CheckCircle2 size={12} className="text-green-400" />
-              <span className="text-[11px] text-green-400">Completed</span>
-            </div>
-          )}
-        </div>
-
-        {/* Tabs */}
-        <div className="flex border-b border-zinc-800/60 flex-shrink-0">
-          {TABS.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={cn(
-                'flex-1 py-2 text-[11px] font-medium transition-colors border-b-2',
-                activeTab === tab
-                  ? 'text-blue-400 border-blue-500'
-                  : 'text-zinc-600 border-transparent hover:text-zinc-400',
-              )}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-
-        {/* Tab content */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {activeTab === 'Overview' && (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
-                  Configuration
-                </p>
-                {[
-                  { label: 'Target', value: (sc?.targetSystemId as string)?.slice(0, 16) + '...' ?? '—', icon: <Globe size={11} /> },
-                  { label: 'Behavior', value: (sc?.behaviorModelId as string)?.slice(0, 16) + '...' ?? '—', icon: <GitBranch size={11} /> },
-                  { label: 'Pattern', value: (sc?.trafficPattern as Record<string, unknown>)?.type as string ?? '—', icon: <Activity size={11} /> },
-                  { label: 'Version', value: `v${sc?.version ?? 1}`, icon: <Settings size={11} /> },
-                  { label: 'Created', value: sc?.createdAt ? formatDate(sc.createdAt as string) : '—', icon: <Clock size={11} /> },
-                ].map(({ label, value, icon }) => (
-                  <div key={label} className="flex items-center justify-between py-1.5 border-b border-zinc-800/40">
-                    <div className="flex items-center gap-1.5 text-zinc-600">
-                      {icon}
-                      <span className="text-[11px]">{label}</span>
+            {/* CONFIG TAB */}
+            {tab === 'config' && (
+              <div className="p-4 space-y-4 font-mono text-xs">
+                <div className="text-zinc-600 text-[10px] uppercase tracking-wider mb-3">
+                  Scenario Configuration
+                </div>
+                {/* JSON-like config viewer */}
+                <div className="rounded-lg border border-zinc-800 bg-[#111] p-4 space-y-1.5">
+                  <div className="text-zinc-500"><span className="text-zinc-600">{'{'}</span></div>
+                  <div className="pl-4 space-y-1">
+                    <div>
+                      <span className="text-blue-400">&quot;name&quot;</span>
+                      <span className="text-zinc-600">: </span>
+                      <span className="text-green-400">&quot;{(sc?.name as string) ?? '...'}&quot;</span>
+                      <span className="text-zinc-600">,</span>
                     </div>
-                    <span className="text-[11px] text-zinc-400 font-mono">{value}</span>
+                    <div>
+                      <span className="text-blue-400">&quot;status&quot;</span>
+                      <span className="text-zinc-600">: </span>
+                      <span className="text-yellow-400">&quot;{(sc?.status as string) ?? '...'}&quot;</span>
+                      <span className="text-zinc-600">,</span>
+                    </div>
+                    <div>
+                      <span className="text-blue-400">&quot;version&quot;</span>
+                      <span className="text-zinc-600">: </span>
+                      <span className="text-orange-400">{(sc?.version as number) ?? 1}</span>
+                      <span className="text-zinc-600">,</span>
+                    </div>
+                    <div>
+                      <span className="text-blue-400">&quot;trafficPattern&quot;</span>
+                      <span className="text-zinc-600">: {'{'}</span>
+                    </div>
+                    <div className="pl-4 space-y-1">
+                      <div>
+                        <span className="text-blue-400">&quot;type&quot;</span>
+                        <span className="text-zinc-600">: </span>
+                        <span className="text-green-400">&quot;{(trafficPattern?.type as string) ?? 'steady'}&quot;</span>
+                        <span className="text-zinc-600">,</span>
+                      </div>
+                      {trafficPattern?.steadyAgents && (
+                        <div>
+                          <span className="text-blue-400">&quot;steadyAgents&quot;</span>
+                          <span className="text-zinc-600">: </span>
+                          <span className="text-orange-400">{trafficPattern.steadyAgents as number}</span>
+                        </div>
+                      )}
+                      {trafficPattern?.startAgents && (
+                        <div>
+                          <span className="text-blue-400">&quot;startAgents&quot;</span>
+                          <span className="text-zinc-600">: </span>
+                          <span className="text-orange-400">{trafficPattern.startAgents as number}</span>
+                          <span className="text-zinc-600">,</span>
+                        </div>
+                      )}
+                      {trafficPattern?.endAgents && (
+                        <div>
+                          <span className="text-blue-400">&quot;endAgents&quot;</span>
+                          <span className="text-zinc-600">: </span>
+                          <span className="text-orange-400">{trafficPattern.endAgents as number}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div><span className="text-zinc-600">{'}'}</span><span className="text-zinc-600">,</span></div>
+                    <div>
+                      <span className="text-blue-400">&quot;createdAt&quot;</span>
+                      <span className="text-zinc-600">: </span>
+                      <span className="text-green-400">&quot;{sc?.createdAt ? formatDate(sc.createdAt as string) : '...'}&quot;</span>
+                    </div>
+                  </div>
+                  <div className="text-zinc-500"><span className="text-zinc-600">{'}'}</span></div>
+                </div>
+              </div>
+            )}
+
+            {/* REGIONS TAB */}
+            {tab === 'regions' && (
+              <div className="p-4 space-y-2">
+                <div className="text-zinc-600 text-[10px] uppercase tracking-wider mb-3 font-mono">
+                  Traffic Source Distribution
+                </div>
+                {REGION_PROFILES.map((r) => (
+                  <div key={r.code} className="flex items-center gap-3 py-2 border-b border-zinc-800/40">
+                    <div className="w-28 text-[11px] text-zinc-400 truncate">{r.label}</div>
+                    <div className="flex-1 bg-zinc-800 rounded-full h-1.5">
+                      <div
+                        className="bg-blue-500 h-1.5 rounded-full transition-all"
+                        style={{ width: `${r.pct}%` }}
+                      />
+                    </div>
+                    <div className="w-8 text-[11px] text-blue-400 font-mono text-right">{r.pct}%</div>
+                    <div className="w-14 text-[11px] text-zinc-600 font-mono text-right">{r.p50}ms</div>
+                    <div className="w-12 text-[11px] text-zinc-600 font-mono text-right">{r.mobile}%📱</div>
                   </div>
                 ))}
               </div>
+            )}
 
-              {/* Live metrics during run */}
-              {runMode !== 'idle' && (
-                <div className="space-y-2">
-                  <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
-                    Live Metrics
-                  </p>
+            {/* HEADERS TAB */}
+            {tab === 'headers' && (
+              <div className="p-4 font-mono text-xs">
+                <div className="text-zinc-600 text-[10px] uppercase tracking-wider mb-3">
+                  Region-specific Request Headers
+                </div>
+                <div className="space-y-3">
                   {[
-                    { label: 'Active Agents', value: formatNumber(metrics.activeAgents), icon: <Users size={11} />, color: 'text-blue-400' },
-                    { label: 'Requests/sec', value: formatNumber(metrics.rps), icon: <Zap size={11} />, color: 'text-yellow-400' },
-                    { label: 'P95 Latency', value: metrics.p95 > 0 ? formatMs(metrics.p95) : '—', icon: <Activity size={11} />, color: 'text-zinc-300' },
-                    { label: 'Total Requests', value: formatNumber(metrics.totalRequests), icon: <CheckCircle2 size={11} />, color: 'text-green-400' },
-                    { label: 'Errors', value: formatNumber(metrics.totalErrors), icon: <XCircle size={11} />, color: metrics.totalErrors > 0 ? 'text-red-400' : 'text-zinc-600' },
-                  ].map(({ label, value, icon, color }) => (
-                    <div key={label} className="flex items-center justify-between py-1.5 border-b border-zinc-800/40">
-                      <div className={cn('flex items-center gap-1.5', color)}>
-                        {icon}
-                        <span className="text-[11px]">{label}</span>
+                    { region: 'EU_WEST',      headers: { 'Accept-Language': 'en-GB,en;q=0.9,fr;q=0.8', 'Accept-Encoding': 'gzip, deflate, br', 'DNT': '1' } },
+                    { region: 'ASIA_SOUTH',   headers: { 'Accept-Language': 'hi-IN,hi;q=0.9,en;q=0.7', 'Accept-Encoding': 'gzip, deflate' } },
+                    { region: 'ASIA_CENTRAL', headers: { 'Accept-Language': 'ar-SA,ar;q=0.9,en;q=0.8', 'Accept-Encoding': 'gzip, deflate' } },
+                    { region: 'LATAM',        headers: { 'Accept-Language': 'pt-BR,pt;q=0.9,es;q=0.8', 'Accept-Encoding': 'gzip, deflate' } },
+                  ].map((entry) => (
+                    <div key={entry.region} className="rounded border border-zinc-800 bg-[#111] overflow-hidden">
+                      <div className="px-3 py-1.5 bg-zinc-800/50 border-b border-zinc-800 text-[10px] text-zinc-500 uppercase tracking-wider">
+                        {entry.region}
                       </div>
-                      <span className={cn('text-[11px] font-semibold tabular-nums', color)}>{value}</span>
+                      <div className="p-3 space-y-1.5">
+                        {Object.entries(entry.headers).map(([k, v]) => (
+                          <div key={k} className="flex items-start gap-2">
+                            <span className="text-blue-400 flex-shrink-0">{k}:</span>
+                            <span className="text-green-400 break-all">&quot;{v}&quot;</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* BEHAVIOR TAB */}
+            {tab === 'body' && (
+              <div className="p-4 font-mono text-xs">
+                <div className="text-zinc-600 text-[10px] uppercase tracking-wider mb-3">
+                  Behavior Model — State Machine
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-[#111] p-4 space-y-1.5">
+                  <div className="text-zinc-600">{'{'}</div>
+                  <div className="pl-4 space-y-1">
+                    <div>
+                      <span className="text-blue-400">&quot;behaviorModelId&quot;</span>
+                      <span className="text-zinc-600">: </span>
+                      <span className="text-green-400">&quot;{(sc?.behaviorModelId as string)?.slice(0, 20) ?? '...'}&quot;</span>
+                      <span className="text-zinc-600">,</span>
+                    </div>
+                    <div>
+                      <span className="text-blue-400">&quot;entryNode&quot;</span>
+                      <span className="text-zinc-600">: </span>
+                      <span className="text-green-400">&quot;fetch_user&quot;</span>
+                      <span className="text-zinc-600">,</span>
+                    </div>
+                    <div>
+                      <span className="text-blue-400">&quot;nodes&quot;</span>
+                      <span className="text-zinc-600">: {'['}</span>
+                    </div>
+                    <div className="pl-4">
+                      <div className="text-zinc-600">{'{'}</div>
+                      <div className="pl-4 space-y-1">
+                        <div><span className="text-blue-400">&quot;id&quot;</span><span className="text-zinc-600">: </span><span className="text-green-400">&quot;fetch_user&quot;</span><span className="text-zinc-600">,</span></div>
+                        <div><span className="text-blue-400">&quot;type&quot;</span><span className="text-zinc-600">: </span><span className="text-yellow-400">&quot;http&quot;</span><span className="text-zinc-600">,</span></div>
+                        <div><span className="text-blue-400">&quot;method&quot;</span><span className="text-zinc-600">: </span><span className="text-green-400">&quot;GET&quot;</span></div>
+                      </div>
+                      <div className="text-zinc-600">{'}'}</div>
+                    </div>
+                    <div><span className="text-zinc-600">{']'}</span></div>
+                  </div>
+                  <div className="text-zinc-600">{'}'}</div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── STATUS BAR — like Postman's response status ── */}
+          {runMode !== 'idle' && (
+            <div className="border-t border-zinc-800/60 px-4 py-2 bg-[#111] flex items-center gap-4 flex-shrink-0">
+              {runMode === 'running' ? (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                    <span className="text-[11px] text-green-400 font-medium">RUNNING</span>
+                  </div>
+                  <span className="text-[11px] text-zinc-600">|</span>
+                  <span className="text-[11px] text-zinc-400 font-mono">{formatNumber(metrics.activeAgents)} agents</span>
+                  <span className="text-[11px] text-zinc-600">|</span>
+                  <span className="text-[11px] text-zinc-400 font-mono">{formatNumber(metrics.rps)} rps</span>
+                  <span className="text-[11px] text-zinc-600">|</span>
+                  <span className="text-[11px] text-zinc-400 font-mono">{metrics.p95 > 0 ? formatMs(metrics.p95) : '—'} p95</span>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 size={11} className="text-green-400" />
+                    <span className="text-[11px] text-green-400 font-medium">COMPLETED</span>
+                  </div>
+                  <span className="text-[11px] text-zinc-600">|</span>
+                  <span className="text-[11px] text-zinc-400 font-mono">{formatNumber(metrics.totalRequests)} requests</span>
+                  <span className="text-[11px] text-zinc-600">|</span>
+                  <span className={cn('text-[11px] font-mono', metrics.totalErrors > 0 ? 'text-red-400' : 'text-green-400')}>
+                    {metrics.totalErrors} errors
+                  </span>
+                </>
               )}
             </div>
           )}
+        </div>
 
-          {activeTab === 'Regions' && (
-            <div className="space-y-2">
-              <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider mb-3">
-                Traffic Source Regions
-              </p>
-              {REGION_PROFILES.map((region) => (
-                <div key={region.code} className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm">{region.flag}</span>
-                      <span className="text-xs font-medium text-zinc-300">{region.label}</span>
+        {/* ── RIGHT — response/results panel (like Postman response panel) */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+
+          {/* Result tabs — like Postman's Body/Headers/Tests result tabs */}
+          <div className="flex items-center border-b border-zinc-800/60 bg-[#1a1a1a] flex-shrink-0 px-2">
+            {([
+              { key: 'map',     label: 'World Map' },
+              { key: 'metrics', label: 'RPS' },
+              { key: 'latency', label: 'Latency' },
+            ] as { key: ResultTab; label: string }[]).map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setResultTab(t.key)}
+                className={cn(
+                  'px-3 py-2.5 text-xs transition-colors border-b-2 whitespace-nowrap',
+                  resultTab === t.key
+                    ? 'text-white border-blue-500'
+                    : 'text-zinc-500 border-transparent hover:text-zinc-300',
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+
+            {/* Live indicator */}
+            {runMode === 'running' && (
+              <div className="ml-auto flex items-center gap-1.5 px-3 py-1 mr-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                <span className="text-[10px] text-green-400">LIVE</span>
+              </div>
+            )}
+          </div>
+
+          {/* Result content */}
+          <div className="flex-1 overflow-hidden">
+            {resultTab === 'map' && (
+              <div className="h-full p-4">
+                <WorldMap
+                  active={runMode === 'running'}
+                  agentCount={metrics.activeAgents}
+                  regions={regionDistribution.length > 0 ? regionDistribution : undefined}
+                />
+              </div>
+            )}
+
+            {resultTab === 'metrics' && (
+              <div className="h-full p-4 flex flex-col">
+                <div className="grid grid-cols-4 gap-3 mb-4 flex-shrink-0">
+                  {[
+                    { label: 'Active Agents', value: formatNumber(metrics.activeAgents), icon: <Users size={12} />, color: 'text-blue-400' },
+                    { label: 'Requests/sec',  value: formatNumber(metrics.rps),          icon: <Zap size={12} />,   color: 'text-yellow-400' },
+                    { label: 'Total Requests',value: formatNumber(metrics.totalRequests), icon: <Activity size={12} />, color: 'text-green-400' },
+                    { label: 'Errors',        value: formatNumber(metrics.totalErrors),   icon: <XCircle size={12} />, color: metrics.totalErrors > 0 ? 'text-red-400' : 'text-zinc-600' },
+                  ].map(({ label, value, icon, color }) => (
+                    <div key={label} className="rounded-lg border border-zinc-800 bg-[#1a1a1a] p-3">
+                      <div className={cn('flex items-center gap-1.5 mb-1', color)}>
+                        {icon}
+                        <span className="text-[10px]">{label}</span>
+                      </div>
+                      <span className={cn('text-xl font-semibold tabular-nums', color)}>{value}</span>
                     </div>
-                    <span className="text-xs font-semibold text-blue-400">{region.pct}%</span>
-                  </div>
-                  <div className="w-full bg-zinc-800 rounded-full h-1 mb-2">
-                    <div
-                      className="bg-blue-500 h-1 rounded-full"
-                      style={{ width: `${region.pct}%` }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between text-[10px] text-zinc-600">
-                    <span>P50: {region.p50}ms</span>
-                    <span>Mobile: {region.mobile}%</span>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
-
-          {activeTab === 'Traffic' && (
-            <div className="space-y-4">
-              <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
-                Traffic Pattern
-              </p>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
-                <p className="text-xs font-medium text-zinc-300 capitalize mb-1">
-                  {((sc?.trafficPattern as Record<string, unknown>)?.type as string) ?? 'steady'}
-                </p>
-                <p className="text-[11px] text-zinc-600">
-                  {((sc?.trafficPattern as Record<string, unknown>)?.steadyAgents as number)
-                    ? `${(sc?.trafficPattern as Record<string, unknown>).steadyAgents} concurrent agents`
-                    : 'Custom pattern'}
-                </p>
+                <div className="flex-1 rounded-lg border border-zinc-800 bg-[#1a1a1a] p-3">
+                  <RpsChart data={metricsHistory} />
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {activeTab === 'Behavior' && (
-            <div className="space-y-3">
-              <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
-                User Behavior Model
-              </p>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
-                <p className="text-[11px] text-zinc-500">
-                  Behavior model defines how virtual users navigate your application — HTTP sequences, wait times, retries, and state transitions.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'Headers' && (
-            <div className="space-y-3">
-              <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
-                Region-specific Headers
-              </p>
-              <div className="space-y-2">
-                {[
-                  { region: 'EU West', header: 'Accept-Language', value: 'en-GB,en;q=0.9' },
-                  { region: 'EU West', header: 'DNT', value: '1' },
-                  { region: 'South Asia', header: 'Accept-Language', value: 'hi-IN,hi;q=0.9' },
-                  { region: 'Middle East', header: 'Accept-Language', value: 'ar-SA,ar;q=0.9' },
-                ].map((h, i) => (
-                  <div key={i} className="rounded border border-zinc-800 bg-zinc-900/30 p-2">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[9px] text-zinc-600 uppercase">{h.region}</span>
+            {resultTab === 'latency' && (
+              <div className="h-full p-4 flex flex-col">
+                <div className="grid grid-cols-3 gap-3 mb-4 flex-shrink-0">
+                  {[
+                    { label: 'P50', value: metrics.p50 > 0 ? formatMs(metrics.p50) : '—', color: 'text-green-400' },
+                    { label: 'P95', value: metrics.p95 > 0 ? formatMs(metrics.p95) : '—', color: 'text-yellow-400' },
+                    { label: 'Regions', value: `${Object.keys(metrics.regionBreakdown).length}`, color: 'text-blue-400' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="rounded-lg border border-zinc-800 bg-[#1a1a1a] p-3">
+                      <span className="text-[10px] text-zinc-600 block mb-1">{label}</span>
+                      <span className={cn('text-xl font-semibold tabular-nums font-mono', color)}>{value}</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-blue-400 font-mono">{h.header}:</span>
-                      <span className="text-[11px] text-zinc-400 font-mono truncate">{h.value}</span>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+                <div className="flex-1 rounded-lg border border-zinc-800 bg-[#1a1a1a] p-3">
+                  <LatencyChart data={metricsHistory} />
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
-
-      {/* ── RIGHT PANEL — war room / map ─────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* World map */}
-        <div className="flex-1 relative overflow-hidden">
-          <div className="absolute inset-0 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h3 className="text-sm font-semibold text-white">
-                  {runMode === 'idle' ? 'Traffic Origin Preview' : runMode === 'running' ? 'Live Traffic Origins' : 'Completed — Traffic Summary'}
-                </h3>
-                <p className="text-[11px] text-zinc-500 mt-0.5">
-                  {runMode === 'idle'
-                    ? 'Default global distribution · Run to see live traffic'
-                    : runMode === 'running'
-                    ? `${formatNumber(metrics.activeAgents)} agents active · ${formatNumber(metrics.totalRequests)} requests sent`
-                    : `Run complete · ${formatNumber(metrics.totalRequests)} total requests · ${formatNumber(metrics.totalErrors)} errors`}
-                </p>
-              </div>
-              {runMode === 'running' && (
-                <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-green-400/10 border border-green-400/20">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                  <span className="text-[10px] text-green-400 font-medium">LIVE</span>
+    </div>
+  );
+}
