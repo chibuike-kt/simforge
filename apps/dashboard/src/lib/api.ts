@@ -69,10 +69,9 @@ export const api = {
 
   // Approvals
   getPendingRuns: () => apiFetch<unknown[]>('/api/approvals/pending'),
-  approveRun: (runId: string) => apiFetch(`/api/approvals/${runId}/approve`, { method: 'POST' }),
-  rejectRun: (runId: string, reason: string) =>
-    apiFetch(`/api/approvals/${runId}/reject`, {
+  approveRun: (runId: string) =>
+    apiFetch(`/api/approvals/${runId}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({}),
     }),
 };
