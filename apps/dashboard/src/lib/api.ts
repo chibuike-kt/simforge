@@ -74,4 +74,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({}),
     }),
+
+  // Metrics
+  getRunMetrics: (runId: string) => apiFetch<unknown>(`/api/metrics/runs/${runId}`),
+  getScenarioRunMetrics: (scenarioId: string) =>
+    apiFetch<unknown[]>(`/api/metrics/scenarios/${scenarioId}/runs`),
 };
