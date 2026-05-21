@@ -108,7 +108,11 @@ const DEFAULT_STEP = (): FlowStep => ({
   method: 'POST',
   url: '',
   headers: [{ key: 'Content-Type', value: 'application/json' }],
-  body: '{\n  \n}',
+  body: `{
+  "name": "{{faker.person.fullName}}",
+  "email": "{{faker.internet.email}}",
+  "password": "{{faker.internet.password}}"
+}`,
   auth: { type: 'none', value: '' },
   extractRules: [],
 });
@@ -436,10 +440,68 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
     if (activeStepId === sid) setActiveStepId(remaining[0].id);
   }
 
-  function insertFakerVar(variable: string) {
-    updateStep(activeStep.id, { body: activeStep.body + variable });
-    setShowFakerMenu(false);
+function insertFakerVar(variable: string) {
+  const body = activeStep.body.trimEnd();
+
+  // Extract the field name from the faker variable
+  const fieldName = getFieldName(variable);
+  const newPair = `"${fieldName}": "${variable}"`;
+
+  // Smart insert — if body is a JSON object, insert before the closing brace
+  if (body.endsWith('}')) {
+    const hasContent = body.replace(/\s/g, '') !== '{}';
+    const insertion = hasContent
+      ? body.slice(0, body.lastIndexOf('}')) + `,\n  ${newPair}\n}`
+      : `{\n  ${newPair}\n}`;
+    updateStep(activeStep.id, { body: insertion });
+  } else {
+    updateStep(activeStep.id, { body: body + newPair });
   }
+  setShowFakerMenu(false);
+}
+
+function getFieldName(variable: string): string {
+  const v = variable.replace(/^\{\{|\}\}$/g, '').trim();
+  const map: Record<string, string> = {
+    'faker.person.fullName': 'name',
+    'faker.person.firstName': 'firstName',
+    'faker.person.lastName': 'lastName',
+    'faker.person.jobTitle': 'jobTitle',
+    'faker.internet.email': 'email',
+    'faker.internet.username': 'username',
+    'faker.internet.password': 'password',
+    'faker.internet.url': 'url',
+    'faker.phone.number': 'phone',
+    'faker.string.uuid': 'id',
+    'faker.string.nanoid': 'nanoid',
+    'faker.database.mongodbId': 'mongoId',
+    'faker.finance.amount': 'amount',
+    'faker.finance.currency': 'currency',
+    'faker.finance.creditCard': 'cardNumber',
+    'faker.finance.iban': 'iban',
+    'faker.finance.pin': 'pin',
+    'faker.location.city': 'city',
+    'faker.location.country': 'country',
+    'faker.location.streetAddress': 'address',
+    'faker.location.zipCode': 'zipCode',
+    'faker.commerce.productName': 'product',
+    'faker.commerce.price': 'price',
+    'faker.company.name': 'company',
+    'faker.date.future': 'expiresAt',
+    'faker.date.past': 'createdAt',
+    'faker.date.birthdate': 'dateOfBirth',
+    'faker.number.int': 'count',
+    'faker.number.float': 'value',
+    'faker.lorem.sentence': 'description',
+    'region.country': 'country',
+    'region.locale': 'locale',
+    'region.code': 'region',
+    'step.1.response.id': 'userId',
+    'step.1.response.token': 'token',
+    'step.2.response.id': 'resourceId',
+  };
+  return map[v] ?? v.split('.').pop() ?? 'value';
+}
 
   async function handleRun() {
     try {
@@ -468,23 +530,32 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-[#0f0f0f]">
-
       {/* ── TOP BAR ─────────────────────────────────────────── */}
       <div className="flex items-center gap-3 px-3 py-2 border-b border-zinc-800/60 bg-[#161616] flex-shrink-0">
         <div className="flex items-center gap-2 px-2 py-1 rounded bg-zinc-800/60 border border-zinc-700/40">
-          <span className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">FLOW</span>
-          <span className="text-xs text-zinc-300 max-w-[180px] truncate">{(sc?.name as string) ?? 'Loading...'}</span>
-          <span className={cn(
-            'text-[9px] font-medium px-1 py-0.5 rounded border',
-            sc?.status === 'published' ? 'bg-green-400/10 text-green-400 border-green-400/20' : 'bg-zinc-700/10 text-zinc-500 border-zinc-700/20',
-          )}>
+          <span className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">
+            FLOW
+          </span>
+          <span className="text-xs text-zinc-300 max-w-[180px] truncate">
+            {(sc?.name as string) ?? 'Loading...'}
+          </span>
+          <span
+            className={cn(
+              'text-[9px] font-medium px-1 py-0.5 rounded border',
+              sc?.status === 'published'
+                ? 'bg-green-400/10 text-green-400 border-green-400/20'
+                : 'bg-zinc-700/10 text-zinc-500 border-zinc-700/20',
+            )}
+          >
             {(sc?.status as string) ?? 'draft'}
           </span>
         </div>
 
         <div className="h-4 w-px bg-zinc-800" />
 
-        <span className="text-[11px] text-zinc-600">{steps.length} step{steps.length !== 1 ? 's' : ''}</span>
+        <span className="text-[11px] text-zinc-600">
+          {steps.length} step{steps.length !== 1 ? 's' : ''}
+        </span>
 
         {/* Scale */}
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-zinc-700/50 bg-zinc-800/40">
@@ -507,7 +578,11 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
               disabled={submitRun.isPending || sc?.status !== 'published'}
               className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-blue-500 hover:bg-blue-400 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold transition-colors shadow-lg shadow-blue-500/20"
             >
-              {submitRun.isPending ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+              {submitRun.isPending ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <Play size={12} />
+              )}
               Run
             </button>
           )}
@@ -522,7 +597,11 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
           )}
           {runMode === 'done' && (
             <button
-              onClick={() => { setRunMode('idle'); resetMetrics(); setMetricsHistory(generateEmpty(40)); }}
+              onClick={() => {
+                setRunMode('idle');
+                resetMetrics();
+                setMetricsHistory(generateEmpty(40));
+              }}
               className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold transition-colors"
             >
               <Play size={12} />
@@ -534,12 +613,16 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
 
       {/* ── MAIN SPLIT ──────────────────────────────────────── */}
       <div className="flex-1 flex overflow-hidden">
-
         {/* ── STEP LIST ─────────────────────────────────────── */}
         <div className="w-52 flex-shrink-0 border-r border-zinc-800/60 flex flex-col overflow-hidden bg-[#141414]">
           <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800/40">
-            <span className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">Flow Steps</span>
-            <button onClick={addStep} className="text-zinc-600 hover:text-zinc-300 transition-colors p-0.5 rounded hover:bg-zinc-800">
+            <span className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
+              Flow Steps
+            </span>
+            <button
+              onClick={addStep}
+              className="text-zinc-600 hover:text-zinc-300 transition-colors p-0.5 rounded hover:bg-zinc-800"
+            >
               <Plus size={12} />
             </button>
           </div>
@@ -553,18 +636,27 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                   onClick={() => setActiveStepId(step.id)}
                   className={cn(
                     'flex items-center gap-2 px-3 py-2.5 border-b border-zinc-800/30 transition-colors cursor-pointer group',
-                    activeStepId === step.id ? 'bg-zinc-800/60 border-l-2 border-l-blue-500' : 'hover:bg-zinc-800/30',
+                    activeStepId === step.id
+                      ? 'bg-zinc-800/60 border-l-2 border-l-blue-500'
+                      : 'hover:bg-zinc-800/30',
                   )}
                 >
                   <GripVertical size={10} className="text-zinc-700 flex-shrink-0" />
-                  <span className="text-[10px] text-zinc-700 w-3 flex-shrink-0 tabular-nums">{i + 1}</span>
+                  <span className="text-[10px] text-zinc-700 w-3 flex-shrink-0 tabular-nums">
+                    {i + 1}
+                  </span>
                   <div className="flex-1 min-w-0">
                     <span className={cn('text-[10px] font-bold', s.color)}>{step.method}</span>
                     <p className="text-[11px] text-zinc-400 truncate mt-0.5">{step.name}</p>
-                    {step.url && <p className="text-[10px] text-zinc-600 truncate font-mono">{step.url}</p>}
+                    {step.url && (
+                      <p className="text-[10px] text-zinc-600 truncate font-mono">{step.url}</p>
+                    )}
                   </div>
                   <button
-                    onClick={(e) => { e.stopPropagation(); removeStep(step.id); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeStep(step.id);
+                    }}
                     className="opacity-0 group-hover:opacity-100 text-zinc-700 hover:text-red-400 transition-all"
                   >
                     <Trash2 size={10} />
@@ -584,7 +676,6 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
 
         {/* ── REQUEST EDITOR ────────────────────────────────── */}
         <div className="w-[420px] flex-shrink-0 flex flex-col border-r border-zinc-800/60 overflow-hidden bg-[#0f0f0f]">
-
           {/* URL bar — exactly like Postman */}
           <div className="flex items-center px-3 py-2.5 border-b border-zinc-800/60 gap-0 flex-shrink-0">
             <MethodDropdown
@@ -611,31 +702,32 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
 
           {/* Tab bar */}
           <div className="flex border-b border-zinc-800/60 flex-shrink-0 bg-[#141414]">
-            {([
-              { key: 'body',    label: 'Body',    dot: false },
-              { key: 'headers', label: 'Headers', dot: activeStep.headers.length > 1 },
-              { key: 'auth',    label: 'Auth',    dot: activeStep.auth.type !== 'none' },
-              { key: 'extract', label: 'Extract', dot: activeStep.extractRules.length > 0 },
-            ] as { key: StepTab; label: string; dot: boolean }[]).map((t) => (
+            {(
+              [
+                { key: 'body', label: 'Body', dot: false },
+                { key: 'headers', label: 'Headers', dot: activeStep.headers.length > 1 },
+                { key: 'auth', label: 'Auth', dot: activeStep.auth.type !== 'none' },
+                { key: 'extract', label: 'Extract', dot: activeStep.extractRules.length > 0 },
+              ] as { key: StepTab; label: string; dot: boolean }[]
+            ).map((t) => (
               <button
                 key={t.key}
                 onClick={() => setStepTab(t.key)}
                 className={cn(
                   'relative flex items-center gap-1.5 px-3 py-2 text-[11px] transition-colors border-b-2 whitespace-nowrap',
-                  stepTab === t.key ? 'text-white border-blue-500' : 'text-zinc-600 border-transparent hover:text-zinc-400',
+                  stepTab === t.key
+                    ? 'text-white border-blue-500'
+                    : 'text-zinc-600 border-transparent hover:text-zinc-400',
                 )}
               >
                 {t.label}
-                {t.dot && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
-                )}
+                {t.dot && <span className="w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />}
               </button>
             ))}
           </div>
 
           {/* Tab content */}
           <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-
             {/* BODY */}
             {stepTab === 'body' && (
               <div className="flex-1 flex flex-col overflow-hidden min-h-0">
@@ -648,20 +740,32 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                     >
                       <Zap size={9} className="text-yellow-400" />
                       <span>Insert variable</span>
-                      <ChevronDown size={9} className={cn('transition-transform text-zinc-600', showFakerMenu && 'rotate-180')} />
+                      <ChevronDown
+                        size={9}
+                        className={cn(
+                          'transition-transform text-zinc-600',
+                          showFakerMenu && 'rotate-180',
+                        )}
+                      />
                     </button>
 
                     {showFakerMenu && (
                       <div className="absolute top-full left-0 mt-1 w-64 bg-[#1c1c1c] border border-zinc-700 rounded-lg shadow-2xl z-50 overflow-hidden">
                         <div className="px-3 py-2 border-b border-zinc-800 bg-[#161616]">
-                          <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Faker Variables</p>
-                          <p className="text-[10px] text-zinc-700 mt-0.5">Click to insert · you can also type your own</p>
+                          <p className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                            Faker Variables
+                          </p>
+                          <p className="text-[10px] text-zinc-700 mt-0.5">
+                            Click to insert · you can also type your own
+                          </p>
                         </div>
                         <div className="max-h-72 overflow-y-auto">
                           {FAKER_VARS.map((group) => (
                             <div key={group.group}>
                               <div className="px-3 py-1.5 bg-zinc-800/30 border-b border-zinc-800/50">
-                                <span className="text-[9px] font-semibold text-zinc-600 uppercase tracking-widest">{group.group}</span>
+                                <span className="text-[9px] font-semibold text-zinc-600 uppercase tracking-widest">
+                                  {group.group}
+                                </span>
                               </div>
                               {group.items.map((v) => (
                                 <button
@@ -670,7 +774,9 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                                   className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-zinc-800/50 transition-colors text-left border-b border-zinc-800/20"
                                 >
                                   <span className="text-[11px] text-zinc-400">{v.label}</span>
-                                  <span className="text-[10px] text-yellow-400 font-mono truncate max-w-[130px] ml-2">{v.value}</span>
+                                  <span className="text-[10px] text-yellow-400 font-mono truncate max-w-[130px] ml-2">
+                                    {v.value}
+                                  </span>
                                 </button>
                               ))}
                             </div>
@@ -679,7 +785,9 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                       </div>
                     )}
                   </div>
-                  <span className="text-[10px] text-zinc-700 ml-auto">JSON · custom values also work</span>
+                  <span className="text-[10px] text-zinc-700 ml-auto">
+                    JSON · custom values also work
+                  </span>
                 </div>
 
                 {/* Syntax-highlighted editor */}
@@ -687,7 +795,9 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                   <textarea
                     value={activeStep.body}
                     onChange={(e) => updateStep(activeStep.id, { body: e.target.value })}
-                    placeholder={'{\n  "name": "{{faker.person.fullName}}",\n  "email": "{{faker.internet.email}}"\n}'}
+                    placeholder={
+                      '{\n  "name": "{{faker.person.fullName}}",\n  "email": "{{faker.internet.email}}",\n  "password": "{{faker.internet.password}}"\n}'
+                    }
                     className="absolute inset-0 w-full h-full p-4 bg-transparent text-transparent caret-zinc-300 text-xs font-mono resize-none focus:outline-none border-none leading-6 z-10"
                     spellCheck={false}
                     style={{ caretColor: '#d4d4d8' }}
@@ -737,7 +847,11 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                       className="flex-1 px-2.5 py-1.5 bg-zinc-800/40 border border-zinc-700/40 rounded text-xs text-zinc-300 font-mono focus:outline-none focus:border-blue-500/30 placeholder:text-zinc-700 transition-colors"
                     />
                     <button
-                      onClick={() => updateStep(activeStep.id, { headers: activeStep.headers.filter((_, j) => j !== i) })}
+                      onClick={() =>
+                        updateStep(activeStep.id, {
+                          headers: activeStep.headers.filter((_, j) => j !== i),
+                        })
+                      }
                       className="text-zinc-700 hover:text-red-400 transition-colors p-1"
                     >
                       <Trash2 size={11} />
@@ -745,7 +859,11 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                   </div>
                 ))}
                 <button
-                  onClick={() => updateStep(activeStep.id, { headers: [...activeStep.headers, { key: '', value: '' }] })}
+                  onClick={() =>
+                    updateStep(activeStep.id, {
+                      headers: [...activeStep.headers, { key: '', value: '' }],
+                    })
+                  }
                   className="flex items-center gap-1.5 text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors mt-2 px-1"
                 >
                   <Plus size={10} />
@@ -758,12 +876,16 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
             {stepTab === 'auth' && (
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 <div>
-                  <label className="text-[10px] text-zinc-600 uppercase tracking-wider block mb-2">Auth Type</label>
+                  <label className="text-[10px] text-zinc-600 uppercase tracking-wider block mb-2">
+                    Auth Type
+                  </label>
                   <div className="flex gap-1 flex-wrap">
                     {(['none', 'bearer', 'apikey', 'basic'] as const).map((type) => (
                       <button
                         key={type}
-                        onClick={() => updateStep(activeStep.id, { auth: { ...activeStep.auth, type } })}
+                        onClick={() =>
+                          updateStep(activeStep.id, { auth: { ...activeStep.auth, type } })
+                        }
                         className={cn(
                           'px-3 py-1.5 rounded text-[11px] font-medium transition-colors capitalize border',
                           activeStep.auth.type === type
@@ -771,7 +893,13 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                             : 'bg-zinc-800/50 text-zinc-500 border-zinc-700/50 hover:text-zinc-300',
                         )}
                       >
-                        {type === 'none' ? 'No Auth' : type === 'bearer' ? 'Bearer Token' : type === 'apikey' ? 'API Key' : 'Basic Auth'}
+                        {type === 'none'
+                          ? 'No Auth'
+                          : type === 'bearer'
+                            ? 'Bearer Token'
+                            : type === 'apikey'
+                              ? 'API Key'
+                              : 'Basic Auth'}
                       </button>
                     ))}
                   </div>
@@ -779,19 +907,34 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                 {activeStep.auth.type !== 'none' && (
                   <div className="space-y-2">
                     <label className="text-[10px] text-zinc-600 uppercase tracking-wider block">
-                      {activeStep.auth.type === 'bearer' ? 'Token' : activeStep.auth.type === 'apikey' ? 'API Key' : 'username:password'}
+                      {activeStep.auth.type === 'bearer'
+                        ? 'Token'
+                        : activeStep.auth.type === 'apikey'
+                          ? 'API Key'
+                          : 'username:password'}
                     </label>
                     <input
                       value={activeStep.auth.value}
-                      onChange={(e) => updateStep(activeStep.id, { auth: { ...activeStep.auth, value: e.target.value } })}
+                      onChange={(e) =>
+                        updateStep(activeStep.id, {
+                          auth: { ...activeStep.auth, value: e.target.value },
+                        })
+                      }
                       placeholder={
-                        activeStep.auth.type === 'bearer' ? 'eyJ... or {{step.1.response.token}}' :
-                        activeStep.auth.type === 'apikey' ? 'sk-...' : 'username:password'
+                        activeStep.auth.type === 'bearer'
+                          ? 'eyJ... or {{step.1.response.token}}'
+                          : activeStep.auth.type === 'apikey'
+                            ? 'sk-...'
+                            : 'username:password'
                       }
                       className="w-full px-3 py-2 bg-zinc-800/40 border border-zinc-700/40 rounded text-xs text-zinc-300 font-mono focus:outline-none focus:border-blue-500/30 placeholder:text-zinc-700"
                     />
                     <p className="text-[10px] text-zinc-700">
-                      Use <span className="text-yellow-400 font-mono">{'{{step.1.response.token}}'}</span> to chain auth from a previous step
+                      Use{' '}
+                      <span className="text-yellow-400 font-mono">
+                        {'{{step.1.response.token}}'}
+                      </span>{' '}
+                      to chain auth from a previous step
                     </p>
                   </div>
                 )}
@@ -802,14 +945,23 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
             {stepTab === 'extract' && (
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 <div>
-                  <p className="text-[10px] text-zinc-600 uppercase tracking-wider mb-1">Extract from Response</p>
+                  <p className="text-[10px] text-zinc-600 uppercase tracking-wider mb-1">
+                    Extract from Response
+                  </p>
                   <p className="text-[11px] text-zinc-600 mb-4 leading-relaxed">
-                    Capture values from this response and use them in later steps via <span className="text-yellow-400 font-mono">{'{{step.N.response.varName}}'}</span>
+                    Capture values from this response and use them in later steps via{' '}
+                    <span className="text-yellow-400 font-mono">
+                      {'{{step.N.response.varName}}'}
+                    </span>
                   </p>
                   <div className="space-y-2">
                     <div className="grid grid-cols-2 gap-2 px-1 pb-1">
-                      <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Variable Name</span>
-                      <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Path in Response</span>
+                      <span className="text-[10px] text-zinc-600 uppercase tracking-wider">
+                        Variable Name
+                      </span>
+                      <span className="text-[10px] text-zinc-600 uppercase tracking-wider">
+                        Path in Response
+                      </span>
                     </div>
                     {activeStep.extractRules.map((rule, i) => (
                       <div key={i} className="flex items-center gap-1.5">
@@ -835,7 +987,11 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                           className="flex-1 px-2.5 py-1.5 bg-zinc-800/40 border border-zinc-700/40 rounded text-xs text-zinc-300 font-mono focus:outline-none focus:border-blue-500/30"
                         />
                         <button
-                          onClick={() => updateStep(activeStep.id, { extractRules: activeStep.extractRules.filter((_, j) => j !== i) })}
+                          onClick={() =>
+                            updateStep(activeStep.id, {
+                              extractRules: activeStep.extractRules.filter((_, j) => j !== i),
+                            })
+                          }
                           className="text-zinc-700 hover:text-red-400 transition-colors p-1"
                         >
                           <Trash2 size={11} />
@@ -843,7 +999,14 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                       </div>
                     ))}
                     <button
-                      onClick={() => updateStep(activeStep.id, { extractRules: [...activeStep.extractRules, { varName: '', path: 'body.' }] })}
+                      onClick={() =>
+                        updateStep(activeStep.id, {
+                          extractRules: [
+                            ...activeStep.extractRules,
+                            { varName: '', path: 'body.' },
+                          ],
+                        })
+                      }
                       className="flex items-center gap-1.5 text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors mt-1"
                     >
                       <Plus size={10} />
@@ -863,18 +1026,29 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                   <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse flex-shrink-0" />
                   <span className="text-[11px] text-green-400 font-semibold">RUNNING</span>
                   <span className="text-zinc-700">·</span>
-                  <span className="text-[11px] text-zinc-400 font-mono tabular-nums">{formatNumber(metrics.activeAgents)} agents</span>
+                  <span className="text-[11px] text-zinc-400 font-mono tabular-nums">
+                    {formatNumber(metrics.activeAgents)} agents
+                  </span>
                   <span className="text-zinc-700">·</span>
-                  <span className="text-[11px] text-zinc-400 font-mono tabular-nums">{formatNumber(metrics.rps)} rps</span>
+                  <span className="text-[11px] text-zinc-400 font-mono tabular-nums">
+                    {formatNumber(metrics.rps)} rps
+                  </span>
                 </>
               ) : (
                 <>
                   <CheckCircle2 size={11} className="text-green-400 flex-shrink-0" />
                   <span className="text-[11px] text-green-400 font-semibold">COMPLETED</span>
                   <span className="text-zinc-700">·</span>
-                  <span className="text-[11px] text-zinc-400 font-mono tabular-nums">{formatNumber(metrics.totalRequests)} req</span>
+                  <span className="text-[11px] text-zinc-400 font-mono tabular-nums">
+                    {formatNumber(metrics.totalRequests)} req
+                  </span>
                   <span className="text-zinc-700">·</span>
-                  <span className={cn('text-[11px] font-mono tabular-nums', metrics.totalErrors > 0 ? 'text-red-400' : 'text-green-400')}>
+                  <span
+                    className={cn(
+                      'text-[11px] font-mono tabular-nums',
+                      metrics.totalErrors > 0 ? 'text-red-400' : 'text-green-400',
+                    )}
+                  >
                     {metrics.totalErrors} err
                   </span>
                 </>
@@ -886,18 +1060,22 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
         {/* ── RESPONSE PANEL ────────────────────────────────── */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex items-center border-b border-zinc-800/60 bg-[#141414] flex-shrink-0 px-1">
-            {([
-              { key: 'map',      label: 'World Map' },
-              { key: 'rps',      label: 'RPS' },
-              { key: 'latency',  label: 'Latency' },
-              { key: 'response', label: 'Response' },
-            ] as { key: ResultTab; label: string }[]).map((t) => (
+            {(
+              [
+                { key: 'map', label: 'World Map' },
+                { key: 'rps', label: 'RPS' },
+                { key: 'latency', label: 'Latency' },
+                { key: 'response', label: 'Response' },
+              ] as { key: ResultTab; label: string }[]
+            ).map((t) => (
               <button
                 key={t.key}
                 onClick={() => setResultTab(t.key)}
                 className={cn(
                   'px-3 py-2.5 text-[11px] transition-colors border-b-2 whitespace-nowrap',
-                  resultTab === t.key ? 'text-white border-blue-500' : 'text-zinc-600 border-transparent hover:text-zinc-400',
+                  resultTab === t.key
+                    ? 'text-white border-blue-500'
+                    : 'text-zinc-600 border-transparent hover:text-zinc-400',
                 )}
               >
                 {t.label}
@@ -909,7 +1087,8 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                 <span className="text-[10px] text-green-400 font-medium">LIVE</span>
                 <span className="text-zinc-700 text-[10px]">·</span>
                 <span className="text-[11px] text-zinc-500 font-mono tabular-nums">
-                  {formatNumber(metrics.activeAgents)} agents · {formatNumber(metrics.rps)} rps · {metrics.p95 > 0 ? formatMs(metrics.p95) : '—'} p95
+                  {formatNumber(metrics.activeAgents)} agents · {formatNumber(metrics.rps)} rps ·{' '}
+                  {metrics.p95 > 0 ? formatMs(metrics.p95) : '—'} p95
                 </span>
               </div>
             )}
@@ -930,9 +1109,13 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                   <div className="h-full flex flex-col">
                     <div className="flex items-center gap-2 mb-3 flex-shrink-0">
                       <AlertCircle size={11} className="text-zinc-600" />
-                      <span className="text-[11px] text-zinc-600">Default global distribution · Run to see live traffic</span>
+                      <span className="text-[11px] text-zinc-600">
+                        Default global distribution · Run to see live traffic
+                      </span>
                     </div>
-                    <div className="flex-1"><WorldMap active={false} agentCount={0} /></div>
+                    <div className="flex-1">
+                      <WorldMap active={false} agentCount={0} />
+                    </div>
                   </div>
                 ) : (
                   <WorldMap
@@ -948,9 +1131,21 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
               <div className="h-full p-4 flex flex-col gap-3">
                 <div className="grid grid-cols-3 gap-3 flex-shrink-0">
                   {[
-                    { label: 'Active Agents', value: formatNumber(metrics.activeAgents), color: 'text-blue-400' },
-                    { label: 'Requests/sec',  value: formatNumber(metrics.rps),          color: 'text-yellow-400' },
-                    { label: 'Total',         value: formatNumber(metrics.totalRequests), color: 'text-green-400' },
+                    {
+                      label: 'Active Agents',
+                      value: formatNumber(metrics.activeAgents),
+                      color: 'text-blue-400',
+                    },
+                    {
+                      label: 'Requests/sec',
+                      value: formatNumber(metrics.rps),
+                      color: 'text-yellow-400',
+                    },
+                    {
+                      label: 'Total',
+                      value: formatNumber(metrics.totalRequests),
+                      color: 'text-green-400',
+                    },
                   ].map(({ label, value, color }) => (
                     <div key={label} className="rounded-lg border border-zinc-800 bg-[#1a1a1a] p-3">
                       <p className="text-[10px] text-zinc-600 mb-1">{label}</p>
@@ -968,13 +1163,27 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
               <div className="h-full p-4 flex flex-col gap-3">
                 <div className="grid grid-cols-3 gap-3 flex-shrink-0">
                   {[
-                    { label: 'P50',     value: metrics.p50 > 0 ? formatMs(metrics.p50) : '—', color: 'text-green-400' },
-                    { label: 'P95',     value: metrics.p95 > 0 ? formatMs(metrics.p95) : '—', color: 'text-yellow-400' },
-                    { label: 'Errors',  value: formatNumber(metrics.totalErrors), color: metrics.totalErrors > 0 ? 'text-red-400' : 'text-zinc-500' },
+                    {
+                      label: 'P50',
+                      value: metrics.p50 > 0 ? formatMs(metrics.p50) : '—',
+                      color: 'text-green-400',
+                    },
+                    {
+                      label: 'P95',
+                      value: metrics.p95 > 0 ? formatMs(metrics.p95) : '—',
+                      color: 'text-yellow-400',
+                    },
+                    {
+                      label: 'Errors',
+                      value: formatNumber(metrics.totalErrors),
+                      color: metrics.totalErrors > 0 ? 'text-red-400' : 'text-zinc-500',
+                    },
                   ].map(({ label, value, color }) => (
                     <div key={label} className="rounded-lg border border-zinc-800 bg-[#1a1a1a] p-3">
                       <p className="text-[10px] text-zinc-600 mb-1">{label}</p>
-                      <p className={cn('text-xl font-semibold tabular-nums font-mono', color)}>{value}</p>
+                      <p className={cn('text-xl font-semibold tabular-nums font-mono', color)}>
+                        {value}
+                      </p>
                     </div>
                   ))}
                 </div>
@@ -987,7 +1196,9 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
             {resultTab === 'response' && (
               <div className="h-full flex flex-col p-4 gap-3">
                 <div className="flex items-center justify-between flex-shrink-0">
-                  <span className="text-[10px] text-zinc-600 uppercase tracking-wider">Latest Response Sample</span>
+                  <span className="text-[10px] text-zinc-600 uppercase tracking-wider">
+                    Latest Response Sample
+                  </span>
                   {lastResponse && (
                     <button
                       onClick={() => navigator.clipboard.writeText(lastResponse)}
@@ -1002,7 +1213,9 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                   {!lastResponse ? (
                     <div className="h-full flex items-center justify-center">
                       <p className="text-xs text-zinc-700">
-                        {runMode === 'idle' ? 'Run to see response samples' : 'Waiting for first response...'}
+                        {runMode === 'idle'
+                          ? 'Run to see response samples'
+                          : 'Waiting for first response...'}
                       </p>
                     </div>
                   ) : (
@@ -1010,9 +1223,14 @@ export default function ScenarioPage({ params }: { params: Promise<{ id: string 
                       {(() => {
                         try {
                           const parsed = JSON.parse(lastResponse);
-                          return JSON.stringify(parsed, null, 2).split('\n').map((line, li) => (
-                            <span key={li}>{tokenizeLine(line)}{'\n'}</span>
-                          ));
+                          return JSON.stringify(parsed, null, 2)
+                            .split('\n')
+                            .map((line, li) => (
+                              <span key={li}>
+                                {tokenizeLine(line)}
+                                {'\n'}
+                              </span>
+                            ));
                         } catch {
                           return <span className="text-zinc-300">{lastResponse}</span>;
                         }
