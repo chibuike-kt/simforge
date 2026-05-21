@@ -1,110 +1,187 @@
 'use client';
 
-import { Plus, GitBranch, ArrowRight, Clock, Hash, Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { formatDate } from '@/lib/utils';
-import { BehaviorModel } from '@/types';
+import { useState } from 'react';
+import { Plus, GitBranch, Hash, Clock, Search, Loader2, ChevronRight } from 'lucide-react';
 import { useBehaviors } from '@/hooks/use-api';
+import { BehaviorModel } from '@/types';
+import { cn, formatDate } from '@/lib/utils';
 
 export default function BehaviorsPage() {
-  const { data: behaviors, isLoading, error } = useBehaviors();
+  const { data: behaviors, isLoading } = useBehaviors();
+  const [selected, setSelected] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+
+  const list = (behaviors as BehaviorModel[]) ?? [];
+  const filtered = list.filter((b) => b.name.toLowerCase().includes(search.toLowerCase()));
+  const selectedBehavior = list.find((b) => b.id === selected);
 
   return (
-    <div className="space-y-5 animate-slide-in-up">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-white">Behavior Models</h2>
-          <p className="text-sm text-zinc-500 mt-0.5">
-            {isLoading ? 'Loading...' : `${(behaviors as BehaviorModel[])?.length ?? 0} models`}
-          </p>
+    <div className="h-full flex flex-col overflow-hidden bg-[#0f0f0f]">
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-zinc-800/60 bg-[#1a1a1a] flex-shrink-0">
+        <span className="text-sm font-medium text-zinc-300">Behaviors</span>
+        <div className="relative flex-1 max-w-sm">
+          <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
+          <input
+            placeholder="Search behaviors..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-8 pr-3 py-1.5 bg-zinc-800/50 border border-zinc-700/50 rounded text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/50 transition-colors"
+          />
         </div>
-        <Button size="sm" className="h-8 text-xs bg-blue-500 hover:bg-blue-600 text-white gap-1.5">
-          <Plus size={12} />
-          New Model
-        </Button>
+        <div className="ml-auto">
+          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium transition-colors">
+            <Plus size={11} />
+            New Behavior
+          </button>
+        </div>
       </div>
 
-      {isLoading && (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 size={20} className="text-zinc-600 animate-spin" />
-        </div>
-      )}
-
-      {error && (
-        <div className="rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3">
-          <p className="text-sm text-red-400">
-            Failed to load behavior models — is the control plane running?
-          </p>
-        </div>
-      )}
-
-      {!isLoading && !error && (
-        <div className="grid grid-cols-1 gap-3">
-          {((behaviors as BehaviorModel[]) ?? []).map((model) => (
-            <div
-              key={model.id}
-              className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 hover:border-zinc-700 transition-all group cursor-pointer"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-3 flex-1 min-w-0">
-                  <div className="w-9 h-9 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center flex-shrink-0">
-                    <GitBranch size={15} className="text-blue-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-semibold text-white">{model.name}</h3>
-                      <span className="text-[10px] text-zinc-600 border border-zinc-800 rounded px-1.5 py-0.5">
-                        v{model.version}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-4 mt-2">
-                      <div className="flex items-center gap-1.5">
-                        <Hash size={10} className="text-zinc-600" />
-                        <span className="text-xs font-mono text-zinc-600">
-                          {model.compiledHash.slice(0, 12)}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <GitBranch size={10} className="text-zinc-600" />
-                        <span className="text-xs text-zinc-600">Entry: {model.entryNodeId}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Clock size={10} className="text-zinc-600" />
-                        <span className="text-xs text-zinc-600">{formatDate(model.createdAt)}</span>
-                      </div>
-                    </div>
-                  </div>
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left list */}
+        <div className="w-72 border-r border-zinc-800/60 flex flex-col overflow-hidden flex-shrink-0">
+          <div className="px-3 py-2 border-b border-zinc-800/40">
+            <span className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider">
+              {filtered.length} model{filtered.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {isLoading && (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 size={16} className="text-zinc-600 animate-spin" />
+              </div>
+            )}
+            {!isLoading && filtered.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+                <GitBranch size={20} className="text-zinc-700 mb-3" />
+                <p className="text-xs text-zinc-600">No behavior models yet</p>
+              </div>
+            )}
+            {filtered.map((model) => (
+              <button
+                key={model.id}
+                onClick={() => setSelected(model.id)}
+                className={cn(
+                  'w-full flex items-center gap-3 px-3 py-3 border-b border-zinc-800/40 transition-colors text-left',
+                  selected === model.id
+                    ? 'bg-zinc-800/60 border-l-2 border-l-blue-500'
+                    : 'hover:bg-zinc-800/30',
+                )}
+              >
+                <div className="w-7 h-7 rounded bg-zinc-800 border border-zinc-700 flex items-center justify-center flex-shrink-0">
+                  <GitBranch size={12} className="text-blue-400" />
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 gap-1 flex-shrink-0"
-                >
-                  View
-                  <ArrowRight size={11} />
-                </Button>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-zinc-300 truncate">{model.name}</p>
+                  <p className="text-[10px] text-zinc-600 mt-0.5">
+                    v{model.version} · {model.entryNodeId}
+                  </p>
+                </div>
+                <ChevronRight size={11} className="text-zinc-700 flex-shrink-0" />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Right detail */}
+        <div className="flex-1 overflow-y-auto">
+          {!selectedBehavior ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="text-center">
+                <div className="w-16 h-16 rounded-2xl bg-zinc-800/50 border border-zinc-700/50 flex items-center justify-center mx-auto mb-4">
+                  <GitBranch size={24} className="text-zinc-600" />
+                </div>
+                <p className="text-sm font-medium text-zinc-400 mb-1">Select a behavior</p>
+                <p className="text-xs text-zinc-600">Choose a model to view its state machine</p>
               </div>
             </div>
-          ))}
+          ) : (
+            <div className="p-6 max-w-2xl">
+              <div className="flex items-start justify-between mb-6">
+                <div>
+                  <h2 className="text-lg font-semibold text-white">{selectedBehavior.name}</h2>
+                  <div className="flex items-center gap-3 mt-1">
+                    <span className="text-[10px] text-zinc-600 border border-zinc-800 rounded px-1.5 py-0.5">
+                      v{selectedBehavior.version}
+                    </span>
+                    <span className="flex items-center gap-1 text-[11px] text-zinc-500">
+                      <Hash size={9} />
+                      {selectedBehavior.compiledHash.slice(0, 16)}
+                    </span>
+                  </div>
+                </div>
+              </div>
 
-          {((behaviors as BehaviorModel[]) ?? []).length === 0 && (
-            <div className="rounded-xl border border-zinc-800 border-dashed bg-zinc-900/50 py-16 text-center">
-              <GitBranch size={24} className="text-zinc-700 mx-auto mb-3" />
-              <p className="text-sm text-zinc-600">No behavior models yet</p>
-              <p className="text-xs text-zinc-700 mt-1 mb-4">
-                Define how your virtual users behave
-              </p>
-              <Button
-                size="sm"
-                className="h-8 text-xs bg-blue-500 hover:bg-blue-600 text-white gap-1.5"
-              >
-                <Plus size={12} />
-                New Model
-              </Button>
+              {/* JSON view */}
+              <div className="rounded-lg border border-zinc-800 bg-[#111] p-4 font-mono text-xs space-y-1.5 mb-6">
+                <div className="text-zinc-600">{'{'}</div>
+                <div className="pl-4 space-y-1">
+                  <div>
+                    <span className="text-blue-400">&quot;id&quot;</span>
+                    <span className="text-zinc-600">: </span>
+                    <span className="text-green-400">&quot;{selectedBehavior.id}&quot;</span>
+                    <span className="text-zinc-600">,</span>
+                  </div>
+                  <div>
+                    <span className="text-blue-400">&quot;name&quot;</span>
+                    <span className="text-zinc-600">: </span>
+                    <span className="text-green-400">&quot;{selectedBehavior.name}&quot;</span>
+                    <span className="text-zinc-600">,</span>
+                  </div>
+                  <div>
+                    <span className="text-blue-400">&quot;version&quot;</span>
+                    <span className="text-zinc-600">: </span>
+                    <span className="text-orange-400">{selectedBehavior.version}</span>
+                    <span className="text-zinc-600">,</span>
+                  </div>
+                  <div>
+                    <span className="text-blue-400">&quot;entryNodeId&quot;</span>
+                    <span className="text-zinc-600">: </span>
+                    <span className="text-green-400">
+                      &quot;{selectedBehavior.entryNodeId}&quot;
+                    </span>
+                    <span className="text-zinc-600">,</span>
+                  </div>
+                  <div>
+                    <span className="text-blue-400">&quot;compiledHash&quot;</span>
+                    <span className="text-zinc-600">: </span>
+                    <span className="text-green-400">
+                      &quot;{selectedBehavior.compiledHash}&quot;
+                    </span>
+                    <span className="text-zinc-600">,</span>
+                  </div>
+                  <div>
+                    <span className="text-blue-400">&quot;createdAt&quot;</span>
+                    <span className="text-zinc-600">: </span>
+                    <span className="text-green-400">
+                      &quot;{formatDate(selectedBehavior.createdAt)}&quot;
+                    </span>
+                  </div>
+                </div>
+                <div className="text-zinc-600">{'}'}</div>
+              </div>
+
+              {/* Entry node */}
+              <div className="rounded-lg border border-zinc-800 bg-[#1a1a1a] p-4">
+                <p className="text-[10px] font-medium text-zinc-600 uppercase tracking-wider mb-3">
+                  State Machine Entry
+                </p>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-blue-500/20 border border-blue-500/30 flex items-center justify-center">
+                    <div className="w-2 h-2 rounded-full bg-blue-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-zinc-300">
+                      {selectedBehavior.entryNodeId}
+                    </p>
+                    <p className="text-[10px] text-zinc-600">Entry node</p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
