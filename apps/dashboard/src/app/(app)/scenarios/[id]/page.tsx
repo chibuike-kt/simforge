@@ -183,17 +183,37 @@ function MethodDropdown({
 
 // ─── JSON Syntax Highlighter ──────────────────────────────────────────────────
 
+function getFakerVarColor(variable: string): string {
+  const v = variable.replace(/^\{\{|\}\}$/g, '').trim();
+  if (v.startsWith('faker.person')) return 'text-pink-400 bg-pink-400/10';
+  if (v.startsWith('faker.internet')) return 'text-blue-400 bg-blue-400/10';
+  if (v.startsWith('faker.phone')) return 'text-cyan-400 bg-cyan-400/10';
+  if (v.startsWith('faker.location')) return 'text-green-400 bg-green-400/10';
+  if (v.startsWith('faker.finance')) return 'text-emerald-400 bg-emerald-400/10';
+  if (v.startsWith('faker.commerce')) return 'text-teal-400 bg-teal-400/10';
+  if (v.startsWith('faker.company')) return 'text-teal-400 bg-teal-400/10';
+  if (v.startsWith('faker.string')) return 'text-violet-400 bg-violet-400/10';
+  if (v.startsWith('faker.database')) return 'text-violet-400 bg-violet-400/10';
+  if (v.startsWith('faker.number')) return 'text-amber-400 bg-amber-400/10';
+  if (v.startsWith('faker.date')) return 'text-orange-400 bg-orange-400/10';
+  if (v.startsWith('faker.lorem')) return 'text-zinc-400 bg-zinc-400/10';
+  if (v.startsWith('region.')) return 'text-yellow-400 bg-yellow-400/10';
+  if (v.startsWith('step.')) return 'text-red-400 bg-red-400/10';
+  return 'text-white bg-zinc-700/30';
+}
+
 function tokenizeLine(line: string): React.ReactNode[] {
   const tokens: React.ReactNode[] = [];
   let remaining = line;
   let idx = 0;
 
   while (remaining.length > 0) {
-    // Faker/template variable: {{...}}
+    // Faker/template variable: {{...}} — standalone
     const fakerMatch = remaining.match(/^(\{\{[^}]+\}\})/);
     if (fakerMatch) {
+      const color = getFakerVarColor(fakerMatch[1]);
       tokens.push(
-        <span key={idx++} className="text-yellow-300 bg-yellow-400/10 rounded-sm px-0.5">
+        <span key={idx++} className={`${color} rounded-sm px-0.5 font-semibold`}>
           {fakerMatch[1]}
         </span>,
       );
@@ -216,14 +236,12 @@ function tokenizeLine(line: string): React.ReactNode[] {
       continue;
     }
 
-    // String value containing faker variable — split and colorize inline
+    // String value — may contain faker variables inside
     const strMatch = remaining.match(/^("(?:[^"\\]|\\.)*")/);
     if (strMatch) {
       const raw = strMatch[1];
-      // Check if the string contains a faker variable
       if (raw.includes('{{')) {
-        // Render as emerald string but highlight the variable inside
-        const inner = raw.slice(1, -1); // strip quotes
+        const inner = raw.slice(1, -1);
         const parts = inner.split(/(\{\{[^}]+\}\})/g);
         tokens.push(
           <span key={idx++} className="text-emerald-400">
@@ -232,8 +250,9 @@ function tokenizeLine(line: string): React.ReactNode[] {
         );
         parts.forEach((part) => {
           if (part.startsWith('{{')) {
+            const color = getFakerVarColor(part);
             tokens.push(
-              <span key={idx++} className="text-yellow-300 bg-yellow-400/10 rounded-sm px-0.5">
+              <span key={idx++} className={`${color} rounded-sm px-0.5 font-semibold`}>
                 {part}
               </span>,
             );
@@ -277,7 +296,7 @@ function tokenizeLine(line: string): React.ReactNode[] {
     const boolMatch = remaining.match(/^(true|false|null)/);
     if (boolMatch) {
       tokens.push(
-        <span key={idx++} className="text-purple-400">
+        <span key={idx++} className="text-violet-400">
           {boolMatch[1]}
         </span>,
       );
@@ -285,7 +304,7 @@ function tokenizeLine(line: string): React.ReactNode[] {
       continue;
     }
 
-    // Opening/closing braces and brackets
+    // Braces {}
     const braceMatch = remaining.match(/^([{}])/);
     if (braceMatch) {
       tokens.push(
@@ -297,10 +316,11 @@ function tokenizeLine(line: string): React.ReactNode[] {
       continue;
     }
 
+    // Brackets []
     const bracketMatch = remaining.match(/^([\[\]])/);
     if (bracketMatch) {
       tokens.push(
-        <span key={idx++} className="text-blue-500">
+        <span key={idx++} className="text-blue-400">
           {bracketMatch[1]}
         </span>,
       );
@@ -320,7 +340,7 @@ function tokenizeLine(line: string): React.ReactNode[] {
       continue;
     }
 
-    // Whitespace — preserve but don't color
+    // Whitespace — preserve, no color
     const spaceMatch = remaining.match(/^(\s+)/);
     if (spaceMatch) {
       tokens.push(<span key={idx++}>{spaceMatch[1]}</span>);

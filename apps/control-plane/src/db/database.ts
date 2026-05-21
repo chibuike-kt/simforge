@@ -158,4 +158,46 @@ const MIGRATIONS = [
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
   `,
   },
+  {
+    version: '003_run_metrics',
+    sql: `
+      CREATE TABLE IF NOT EXISTS run_metrics (
+        id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        run_id            UUID NOT NULL REFERENCES simulation_runs(id) ON DELETE CASCADE,
+        shard_id          TEXT NOT NULL,
+        total_requests    BIGINT NOT NULL DEFAULT 0,
+        total_errors      BIGINT NOT NULL DEFAULT 0,
+        total_agents      INTEGER NOT NULL DEFAULT 0,
+        completed_agents  INTEGER NOT NULL DEFAULT 0,
+        failed_agents     INTEGER NOT NULL DEFAULT 0,
+        duration_ms       BIGINT NOT NULL DEFAULT 0,
+        peak_rps          INTEGER NOT NULL DEFAULT 0,
+        p50_ms            INTEGER NOT NULL DEFAULT 0,
+        p95_ms            INTEGER NOT NULL DEFAULT 0,
+        p99_ms            INTEGER NOT NULL DEFAULT 0,
+        region_breakdown  JSONB NOT NULL DEFAULT '{}',
+        country_breakdown JSONB NOT NULL DEFAULT '{}',
+        status_breakdown  JSONB NOT NULL DEFAULT '{}',
+        error_samples     JSONB NOT NULL DEFAULT '[]',
+        latency_histogram JSONB NOT NULL DEFAULT '[]',
+        started_at        TIMESTAMPTZ,
+        completed_at      TIMESTAMPTZ,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_run_metrics_run_id ON run_metrics(run_id);
+
+      CREATE TABLE IF NOT EXISTS run_events_summary (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        run_id      UUID NOT NULL REFERENCES simulation_runs(id) ON DELETE CASCADE,
+        event_type  TEXT NOT NULL,
+        count       BIGINT NOT NULL DEFAULT 0,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events_summary(run_id);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_run_metrics_run_shard ON run_metrics(run_id, shard_id);
+    `,
+  },
 ];

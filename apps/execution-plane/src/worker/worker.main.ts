@@ -89,6 +89,80 @@ async function emit(type: SimForgeEventType, payload: object): Promise<void> {
   }
 }
 
+// ─── Metrics Accumulator ──────────────────────────────────────────────────────
+
+interface ShardMetrics {
+  totalRequests: number;
+  totalErrors: number;
+  completedAgents: number;
+  failedAgents: number;
+  latencies: number[];
+  regionBreakdown: Record<string, number>;
+  countryBreakdown: Record<string, number>;
+  statusBreakdown: Record<string, number>;
+  errorSamples: { error: string; count: number; regionCode?: string }[];
+  rpsWindows: number[];
+  startedAt: string;
+}
+
+function computePercentile(sorted: number[], pct: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = Math.floor(sorted.length * pct);
+  return sorted[Math.min(idx, sorted.length - 1)];
+}
+
+async function postMetrics(metrics: ShardMetrics & {
+  runId: string;
+  shardId: string;
+  totalAgents: number;
+  durationMs: number;
+}): Promise<void> {
+  const sorted = [...metrics.latencies].sort((a, b) => a - b);
+  const payload = {
+    runId: metrics.runId,
+    shardId: metrics.shardId,
+    totalRequests: metrics.totalRequests,
+    totalErrors: metrics.totalErrors,
+    totalAgents: metrics.totalAgents,
+    completedAgents: metrics.completedAgents,
+    failedAgents: metrics.failedAgents,
+    durationMs: metrics.durationMs,
+    peakRps: Math.max(...metrics.rpsWindows, 0),
+    p50Ms: computePercentile(sorted, 0.5),
+    p95Ms: computePercentile(sorted, 0.95),
+    p99Ms: computePercentile(sorted, 0.99),
+    regionBreakdown: metrics.regionBreakdown,
+    countryBreakdown: metrics.countryBreakdown,
+    statusBreakdown: metrics.statusBreakdown,
+    errorSamples: metrics.errorSamples.slice(0, 20),
+    latencyHistogram: buildHistogram(sorted),
+    startedAt: metrics.startedAt,
+    completedAt: new Date().toISOString(),
+  };
+
+  try {
+    await fetch('http://localhost:4000/api/metrics/shards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    console.error('[Metrics] Failed to post shard metrics:', err);
+  }
+}
+
+function buildHistogram(sorted: number[]): { bucket: number; count: number }[] {
+  const buckets = [10, 25, 50, 100, 200, 500, 1000, 2000, 5000];
+  const histogram: { bucket: number; count: number }[] = [];
+  let prev = 0;
+  for (const bucket of buckets) {
+    const count = sorted.filter((v) => v > prev && v <= bucket).length;
+    histogram.push({ bucket, count });
+    prev = bucket;
+  }
+  return histogram;
+}
+
 // ─── Job Processor ────────────────────────────────────────────────────────────
 
 async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
@@ -97,13 +171,11 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
 
   console.log(`[Worker:${env.WORKER_ID}] run=${runId} shard=${shardId}`);
 
-  // 1. Verify signature
   const check = verifyJobEnvelope(envelope, env.JOB_SIGNING_SECRET);
   if (!check.valid) {
     throw Object.assign(new Error(`Invalid envelope: ${check.reason}`), { noRetry: true });
   }
 
-  // 2. Idempotency lock
   const lockKey = `sf:shard:lock:${runId}:${shardId}`;
   const acquired = await redis.set(lockKey, env.WORKER_ID, 'EX', 3600, 'NX');
   if (!acquired) {
@@ -111,17 +183,40 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
     return;
   }
 
-  // 3. Circuit check
   const circuit = circuits.get(shardId);
   if (circuit?.open) {
     await emit(SimForgeEventType.SHARD_FAILED, { runId, shardId, reason: 'circuit_open' });
     return;
   }
 
-  // 4. Staggered start
   if (envelope.timingConfig.startOffsetMs > 0) {
     await sleep(envelope.timingConfig.startOffsetMs);
   }
+
+  // ── Metrics accumulator ──
+  const shardMetrics: ShardMetrics = {
+    totalRequests: 0,
+    totalErrors: 0,
+    completedAgents: 0,
+    failedAgents: 0,
+    latencies: [],
+    regionBreakdown: {},
+    countryBreakdown: {},
+    statusBreakdown: {},
+    errorSamples: [],
+    rpsWindows: [],
+    startedAt: new Date().toISOString(),
+  };
+
+  // RPS tracking window
+  const rpsWindow: number[] = [];
+  const rpsInterval = setInterval(() => {
+    const now = Date.now();
+    const windowRequests = rpsWindow.filter((t) => now - t < 1000).length;
+    shardMetrics.rpsWindows.push(windowRequests);
+    // Clean old entries
+    while (rpsWindow.length > 0 && now - rpsWindow[0] > 2000) rpsWindow.shift();
+  }, 1000);
 
   await emit(SimForgeEventType.SHARD_STARTED, {
     runId,
@@ -129,7 +224,6 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
     agentCount: envelope.agentCount,
   });
 
-  // 5. Shared shard resources
   const effectiveRps = Math.min(envelope.targetConfig.maxRps, env.GLOBAL_RPS_CAP);
   const rateLimiter = new TokenBucket(effectiveRps);
   const httpAdapter = new HttpAdapter(
@@ -138,30 +232,73 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
     rateLimiter,
   );
 
-  // 6. Spawn agents — each gets a region profile based on distribution
+  const startMs = Date.now();
   let completed = 0;
   let failed = 0;
   const parentSeed = hashStr(runId + shardId);
   const shardRng = new SeededRandom(parentSeed);
   const batch: Promise<void>[] = [];
 
-  // Region distribution — from job data or default internet distribution
   const regionDistribution = (envelope as unknown as Record<string, unknown>).regionDistribution as
     | { regionCode: string; agentPct: number }[]
     | undefined;
 
+  // Metrics-aware emit wrapper
+  const metricsEmit = async (type: SimForgeEventType, payload: object): Promise<void> => {
+    const p = payload as Record<string, unknown>;
+
+    if (type === SimForgeEventType.RESPONSE_RECEIVED) {
+      shardMetrics.totalRequests++;
+      rpsWindow.push(Date.now());
+
+      if (typeof p.latencyMs === 'number') {
+        shardMetrics.latencies.push(p.latencyMs);
+      }
+      if (typeof p.statusCode === 'number') {
+        const code = String(p.statusCode);
+        shardMetrics.statusBreakdown[code] = (shardMetrics.statusBreakdown[code] ?? 0) + 1;
+      }
+      if (typeof p.regionCode === 'string') {
+        shardMetrics.regionBreakdown[p.regionCode] =
+          (shardMetrics.regionBreakdown[p.regionCode] ?? 0) + 1;
+      }
+      if (typeof p.countryCode === 'string') {
+        shardMetrics.countryBreakdown[p.countryCode] =
+          (shardMetrics.countryBreakdown[p.countryCode] ?? 0) + 1;
+      }
+    }
+
+    if (type === SimForgeEventType.ACTION_DLQ_SENT) {
+      shardMetrics.totalErrors++;
+      const errorKey = String(p.error ?? 'unknown');
+      const existing = shardMetrics.errorSamples.find((e) => e.error === errorKey);
+      if (existing) {
+        existing.count++;
+      } else {
+        shardMetrics.errorSamples.push({
+          error: errorKey,
+          count: 1,
+          regionCode: typeof p.regionCode === 'string' ? p.regionCode : undefined,
+        });
+      }
+    }
+
+    if (type === SimForgeEventType.AGENT_COMPLETED) shardMetrics.completedAgents++;
+    if (type === SimForgeEventType.AGENT_FAILED) shardMetrics.failedAgents++;
+
+    await emit(type, payload);
+  };
+
   for (let i = 0; i < envelope.agentCount; i++) {
     const agentSeed = SeededRandom.childSeed(parentSeed, i);
     const agentRng = new SeededRandom(agentSeed);
-
-    // Pick region for this agent
     const regionProfile = pickRegionProfile(agentRng, regionDistribution);
 
     const agent = new AgentRuntime(
       envelope.behaviorModel,
       httpAdapter,
       rateLimiter,
-      emit,
+      metricsEmit,
       runId,
       shardId,
       env.WORKER_ID,
@@ -190,7 +327,19 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
   }
 
   await Promise.all(batch);
+  clearInterval(rpsInterval);
   await httpAdapter.destroy();
+
+  const durationMs = Date.now() - startMs;
+
+  // Post metrics to control plane
+  await postMetrics({
+    ...shardMetrics,
+    runId,
+    shardId,
+    totalAgents: envelope.agentCount,
+    durationMs,
+  });
 
   await emit(SimForgeEventType.SHARD_COMPLETED, { runId, shardId, completed, failed });
   console.log(`[Worker:${env.WORKER_ID}] Shard ${shardId} — ${completed} ok / ${failed} failed`);
