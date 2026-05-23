@@ -89,28 +89,29 @@ export class HttpAdapter {
       }
     }
 
-    // Resolve header values
-    const resolvedHeaders: Record<string, string> = {};
-    for (const [k, v] of Object.entries(action.headers ?? {})) {
-      resolvedHeaders[k] = resolveTemplate(v, rng, regionCode, countryCode, customKv);
-    }
+// Resolve header values
+const resolvedHeaders: Record<string, string> = {};
+for (const [k, v] of Object.entries(action.headers ?? {})) {
+  resolvedHeaders[k] = resolveTemplate(v, rng, regionCode, countryCode, customKv);
+}
 
     const start = performance.now();
 
     try {
-      const { statusCode, body, headers } = await request(url, {
-        method: action.method,
-        headers: {
-          'content-type': 'application/json',
-          'user-agent': 'SimForge/1.0 (synthetic-traffic)',
-          'x-simforge': 'true',
-          ...resolvedHeaders,
-        },
-        body: resolvedBody,
-        dispatcher: this.agent,
-        bodyTimeout: this.timeoutMs,
-        headersTimeout: this.timeoutMs,
-      });
+    const { statusCode, body, headers } = await request(url, {
+      method: action.method,
+      headers: {
+        'content-type': 'application/json',
+        'user-agent': 'SimForge/1.0 (synthetic-traffic)',
+        'x-simforge': 'true',
+        'accept-encoding': 'identity', // disable compression so we get plain text back
+        ...resolvedHeaders,
+      },
+      body: resolvedBody,
+      dispatcher: this.agent,
+      bodyTimeout: this.timeoutMs,
+      headersTimeout: this.timeoutMs,
+    });
 
       const latencyMs = Math.round(performance.now() - start);
       const raw = await body.text();

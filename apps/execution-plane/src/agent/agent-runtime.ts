@@ -22,25 +22,20 @@ const LOOP_THRESHOLD = 5;
 export type EventEmitter = (type: SimForgeEventType, payload: object) => Promise<void>;
 
 // ─── Model normalizer ─────────────────────────────────────────────────────────
-// BullMQ serializes through Redis JSON — JSONB fields may arrive as strings,
-// and the behavior model structure varies depending on how it was built.
+
 function normalizeModel(raw: BehaviorModel): BehaviorModel {
   const any = raw as unknown as Record<string, unknown>;
-
-  // Try to get nodes from various locations
   let nodes = raw.nodes;
   let entryNodeId = raw.entryNodeId;
 
-  // nodes is a JSON string
   if (typeof nodes === 'string') {
     try {
       nodes = JSON.parse(nodes as unknown as string);
     } catch {
-      nodes = undefined as unknown as BehaviorModel['nodes'];
+      nodes = {} as BehaviorModel['nodes'];
     }
   }
 
-  // nodes missing — try stateGraph
   if (!nodes && any.stateGraph) {
     const sg =
       typeof any.stateGraph === 'string'
@@ -50,34 +45,16 @@ function normalizeModel(raw: BehaviorModel): BehaviorModel {
     if (!entryNodeId && sg?.entryNodeId) entryNodeId = sg.entryNodeId as string;
   }
 
-  // nodes is still a string after stateGraph extraction
   if (typeof nodes === 'string') {
     try {
       nodes = JSON.parse(nodes as unknown as string);
     } catch {
-      nodes = undefined as unknown as BehaviorModel['nodes'];
+      nodes = {} as BehaviorModel['nodes'];
     }
   }
 
-  // Last resort — check if the model itself is the stateGraph
-  if (!nodes && any.nodes === undefined) {
-    const keys = Object.keys(any);
-    const likelyNodes = keys.every((k) => typeof any[k] === 'object');
-    if (likelyNodes && keys.length > 0) {
-      nodes = any as unknown as BehaviorModel['nodes'];
-    }
-  }
-
-  if (!nodes || typeof nodes !== 'object') {
-    console.error(
-      '[normalizeModel] Failed to resolve nodes.',
-      'raw keys:',
-      Object.keys(any),
-      'nodes type:',
-      typeof nodes,
-      'stateGraph type:',
-      typeof any.stateGraph,
-    );
+  if (!nodes || typeof nodes !== 'object' || Object.keys(nodes).length === 0) {
+    console.error('[normalizeModel] Failed to resolve nodes. raw keys:', Object.keys(any));
   }
 
   return {
@@ -93,6 +70,7 @@ export class AgentRuntime {
   private readonly model: BehaviorModel;
   private readonly state: AgentState;
   private readonly rng: SeededRandom;
+  private httpStepCount = 0; // 1-based counter — increments on each HTTP node execution
 
   constructor(
     model: BehaviorModel,
@@ -144,19 +122,14 @@ export class AgentRuntime {
       this.state.status = AgentStatus.ACTIVE;
       let steps = 0;
 
-      // Validate
       if (
         !this.model.nodes ||
         typeof this.model.nodes !== 'object' ||
         Object.keys(this.model.nodes).length === 0
       ) {
-        console.error(`[AgentRuntime] No valid nodes for agent ${this.state.agentId}`);
         return this.fail('invalid_model_nodes');
       }
-
-      if (!this.model.entryNodeId) {
-        return this.fail('missing_entry_node_id');
-      }
+      if (!this.model.entryNodeId) return this.fail('missing_entry_node_id');
 
       const entryNode = this.model.nodes[this.model.entryNodeId];
       if (!entryNode) {
@@ -215,7 +188,8 @@ export class AgentRuntime {
         } | null = null;
 
         if (node.type === 'http' && node.action) {
-          result = await this.executeHttp(node, node.action as HttpAction, steps);
+          this.httpStepCount++; // increment BEFORE executing so step 1 = first HTTP node
+          result = await this.executeHttp(node, node.action as HttpAction, this.httpStepCount);
         } else if (node.type === 'wait' && node.action) {
           const w = node.action as WaitAction;
           const jitter = (this.rng.next() * 2 - 1) * w.jitterMs;
@@ -261,12 +235,13 @@ export class AgentRuntime {
     }
   }
 
-  private async executeHttp(node: BehaviorNode, action: HttpAction, stepIndex: number) {
+  private async executeHttp(node: BehaviorNode, action: HttpAction, httpStep: number) {
     await this.emit(SimForgeEventType.ACTION_EXECUTED, {
       agentId: this.state.agentId,
       runId: this.runId,
       nodeId: node.id,
       method: action.method,
+      httpStep,
       regionCode: this.regionProfile?.regionCode ?? null,
       countryCode: this.regionProfile?.countryCode ?? null,
     });
@@ -274,7 +249,6 @@ export class AgentRuntime {
     const regionHeaders = this.regionProfile
       ? applyRegionProfile(this.regionProfile, this.rng)
       : {};
-
     const nodeExtra = node as unknown as Record<string, unknown>;
     const extractRules = nodeExtra.extractRules as Record<string, string> | undefined;
 
@@ -286,7 +260,7 @@ export class AgentRuntime {
         regionCode: this.regionProfile?.regionCode,
         countryCode: this.regionProfile?.countryCode,
         rng: this.rng,
-        stepIndex,
+        stepIndex: httpStep, // 1-based: first HTTP node = 1
         extractRules,
         customKv: this.state.customKv as Record<string, unknown>,
       },
@@ -326,6 +300,7 @@ export class AgentRuntime {
         actualLatencyMs: result.latencyMs,
         regionLatencyMs: regionLatency,
         nodeId: node.id,
+        httpStep,
         bodyHash: result.bodyHash,
         bodyRaw: result.bodyRaw,
         regionCode: this.regionProfile?.regionCode ?? null,

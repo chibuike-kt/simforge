@@ -74,6 +74,12 @@ export class OrchestrationService {
       nodes: nodes as BehaviorModel['nodes'],
     };
 
+    console.log(
+      '[Orchestration] nodes:',
+      JSON.stringify(behaviorModel.nodes, null, 2),
+    );
+    console.log('[Orchestration] entryNodeId:', behaviorModel.entryNodeId);
+
     // Use provided base URL or fall back to target's
     const effectiveBaseUrl = baseUrl || target.allowedOrigins[0];
 

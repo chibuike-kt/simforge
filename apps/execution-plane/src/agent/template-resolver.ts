@@ -8,7 +8,6 @@ function buildFaker(rng: SeededRandom): Faker {
   return instance;
 }
 
-// All supported template variables
 function resolveVariable(
   variable: string,
   faker: Faker,
@@ -17,10 +16,22 @@ function resolveVariable(
   customKv: Record<string, unknown>,
 ): string {
   // Step response extraction: {{step.1.response.fieldName}}
+  // Looks for step_1_fieldName in customKv
   const stepMatch = variable.match(/^step\.(\d+)\.response\.(.+)$/);
   if (stepMatch) {
-    const key = `step_${stepMatch[1]}_${stepMatch[2]}`;
-    return String(customKv[key] ?? '');
+    const stepNum = stepMatch[1];
+    const varName = stepMatch[2];
+    // Try step_N_varName first, then plain varName as fallback
+    const key = `step_${stepNum}_${varName}`;
+    const value = customKv[key] ?? customKv[varName];
+    if (value !== undefined && value !== '') {
+      return String(value);
+    }
+    console.warn(
+      `[Template] Could not resolve ${variable} — key=${key} customKv keys:`,
+      Object.keys(customKv),
+    );
+    return '';
   }
 
   // Region variables
@@ -28,7 +39,6 @@ function resolveVariable(
   if (variable === 'region.code') return regionCode;
   if (variable === 'region.locale') return getLocale(countryCode);
 
-  // Faker variables
   switch (variable) {
     // Person
     case 'faker.person.fullName':
@@ -41,18 +51,6 @@ function resolveVariable(
       return faker.person.sex();
     case 'faker.person.jobTitle':
       return faker.person.jobTitle();
-
-      // Nigerian phone numbers
-      case 'faker.phone.nigeria':
-        return `+234${faker.number.int({ min: 7000000000, max: 9099999999 }).toString().slice(1)}`;
-      case 'faker.phone.nigeria.mtn':
-        return `+2348${faker.number.int({ min: 10000000, max: 39999999 })}`;
-      case 'faker.phone.nigeria.airtel':
-        return `+2347${faker.number.int({ min: 10000000, max: 99999999 })}`;
-      case 'faker.phone.nigeria.glo':
-        return `+2348${faker.number.int({ min: 10000000, max: 09999999 })}`;
-      case 'faker.phone.nigeria.9mobile':
-        return `+2349${faker.number.int({ min: 10000000, max: 99999999 })}`;
 
     // Internet
     case 'faker.internet.email':
@@ -73,6 +71,73 @@ function resolveVariable(
       return faker.phone.number();
     case 'faker.phone.imei':
       return faker.phone.imei();
+
+    // Nigerian phone numbers
+    case 'faker.phone.nigeria': {
+      const prefixes = [
+        '0703',
+        '0706',
+        '0803',
+        '0806',
+        '0810',
+        '0813',
+        '0814',
+        '0816',
+        '0903',
+        '0906',
+        '0701',
+        '0708',
+        '0802',
+        '0808',
+        '0812',
+        '0902',
+        '0705',
+        '0805',
+        '0807',
+        '0811',
+        '0815',
+        '0905',
+        '0809',
+        '0817',
+        '0818',
+        '0908',
+        '0909',
+      ];
+      const prefix = prefixes[Math.floor(faker.number.int({ min: 0, max: prefixes.length - 1 }))];
+      const suffix = faker.number.int({ min: 1000000, max: 9999999 }).toString();
+      return `+234${prefix.slice(1)}${suffix}`;
+    }
+    case 'faker.phone.nigeria.mtn': {
+      const prefixes = [
+        '0703',
+        '0706',
+        '0803',
+        '0806',
+        '0810',
+        '0813',
+        '0814',
+        '0816',
+        '0903',
+        '0906',
+      ];
+      const prefix = prefixes[Math.floor(faker.number.int({ min: 0, max: prefixes.length - 1 }))];
+      return `+234${prefix.slice(1)}${faker.number.int({ min: 1000000, max: 9999999 })}`;
+    }
+    case 'faker.phone.nigeria.airtel': {
+      const prefixes = ['0701', '0708', '0802', '0808', '0812', '0902'];
+      const prefix = prefixes[Math.floor(faker.number.int({ min: 0, max: prefixes.length - 1 }))];
+      return `+234${prefix.slice(1)}${faker.number.int({ min: 1000000, max: 9999999 })}`;
+    }
+    case 'faker.phone.nigeria.glo': {
+      const prefixes = ['0705', '0805', '0807', '0811', '0815', '0905'];
+      const prefix = prefixes[Math.floor(faker.number.int({ min: 0, max: prefixes.length - 1 }))];
+      return `+234${prefix.slice(1)}${faker.number.int({ min: 1000000, max: 9999999 })}`;
+    }
+    case 'faker.phone.nigeria.9mobile': {
+      const prefixes = ['0809', '0817', '0818', '0908', '0909'];
+      const prefix = prefixes[Math.floor(faker.number.int({ min: 0, max: prefixes.length - 1 }))];
+      return `+234${prefix.slice(1)}${faker.number.int({ min: 1000000, max: 9999999 })}`;
+    }
 
     // Location
     case 'faker.location.city':
@@ -153,13 +218,10 @@ function resolveVariable(
       return faker.database.mongodbObjectId();
 
     default:
-      return `{{${variable}}}`; // leave unresolved variables as-is
+      return `{{${variable}}}`;
   }
 }
 
-/**
- * Resolve all {{variable}} placeholders in a string template.
- */
 export function resolveTemplate(
   template: string,
   rng: SeededRandom,
@@ -177,10 +239,6 @@ export function resolveTemplate(
   });
 }
 
-/**
- * Resolve template variables inside a JSON object recursively.
- * Handles nested objects and arrays.
- */
 export function resolveBody(
   body: unknown,
   rng: SeededRandom,
@@ -188,12 +246,10 @@ export function resolveBody(
   countryCode: string,
   customKv: Record<string, unknown>,
 ): unknown {
-  if (typeof body === 'string') {
+  if (typeof body === 'string')
     return resolveTemplate(body, rng, regionCode, countryCode, customKv);
-  }
-  if (Array.isArray(body)) {
+  if (Array.isArray(body))
     return body.map((item) => resolveBody(item, rng, regionCode, countryCode, customKv));
-  }
   if (body !== null && typeof body === 'object') {
     const resolved: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
@@ -204,10 +260,6 @@ export function resolveBody(
   return body;
 }
 
-/**
- * Extract values from a response body and store in customKv.
- * Extract rules: { "userId": "body.id", "token": "headers.authorization" }
- */
 export function extractFromResponse(
   extractRules: Record<string, string>,
   responseBody: unknown,
@@ -229,11 +281,19 @@ export function extractFromResponse(
         responseHeaders[fieldPath.join('.')] ?? responseHeaders[fieldPath.join('.').toLowerCase()];
     }
 
-    if (value !== undefined) {
-      // Store as step-scoped variable: step_1_userId
+    console.log(
+      `[Extract] step=${stepIndex} var=${varName} path=${path} value=${JSON.stringify(value)}`,
+    );
+
+    if (value !== undefined && value !== null) {
+      // Store with step index — matches {{step.N.response.varName}}
       customKv[`step_${stepIndex}_${varName}`] = value;
-      // Also store as plain variable for convenience
+      // Also store plain varName for convenience
       customKv[varName] = value;
+      console.log(`[Extract] ✓ step_${stepIndex}_${varName} = ${value}`);
+    } else {
+      console.warn(`[Extract] ✗ Failed to extract "${varName}" from path "${path}"`);
+      console.log(`[Extract] Body sample:`, JSON.stringify(responseBody)?.slice(0, 300));
     }
   }
 }
@@ -248,7 +308,7 @@ function getNestedValue(obj: unknown, path: string[]): unknown {
 }
 
 function getLocale(countryCode: string): string {
-  const localeMap: Record<string, string> = {
+  const map: Record<string, string> = {
     US: 'en-US',
     GB: 'en-GB',
     NG: 'en-NG',
@@ -270,5 +330,5 @@ function getLocale(countryCode: string): string {
     UA: 'uk-UA',
     EG: 'ar-EG',
   };
-  return localeMap[countryCode] ?? 'en-US';
+  return map[countryCode] ?? 'en-US';
 }
