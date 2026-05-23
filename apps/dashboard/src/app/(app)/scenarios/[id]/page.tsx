@@ -83,7 +83,6 @@ const FAKER_VARS = [
       { label: 'URL', value: '{{faker.internet.url}}' },
     ],
   },
-
   {
     group: 'Phone',
     items: [
@@ -95,7 +94,16 @@ const FAKER_VARS = [
       { label: 'Nigeria (9mobile)', value: '{{faker.phone.nigeria.9mobile}}' },
     ],
   },
-
+  {
+    group: 'Numbers',
+    items: [
+      { label: '4-digit PIN', value: '{{faker.finance.pin.4}}' },
+      { label: '6-digit code', value: '{{faker.number.digits.6}}' },
+      { label: '8-digit code', value: '{{faker.number.digits.8}}' },
+      { label: 'Random int', value: '{{faker.number.int}}' },
+      { label: 'Random float', value: '{{faker.number.float}}' },
+    ],
+  },
   {
     group: 'Identity',
     items: [
@@ -111,7 +119,8 @@ const FAKER_VARS = [
       { label: 'Currency', value: '{{faker.finance.currency}}' },
       { label: 'Card Number', value: '{{faker.finance.creditCard}}' },
       { label: 'IBAN', value: '{{faker.finance.iban}}' },
-      { label: 'PIN', value: '{{faker.finance.pin}}' },
+      { label: 'PIN (4)', value: '{{faker.finance.pin.4}}' },
+      { label: 'PIN (6)', value: '{{faker.finance.pin.6}}' },
     ],
   },
   {
@@ -305,6 +314,9 @@ function getFakerColor(variable: string): string {
   if (v.startsWith('faker.date')) return 'text-orange-400 bg-orange-400/10';
   if (v.startsWith('region.')) return 'text-yellow-400 bg-yellow-400/10';
   if (v.startsWith('step.')) return 'text-red-400 bg-red-400/10';
+  if (v.startsWith('faker.number.digits')) return 'text-amber-400 bg-amber-400/10';
+  if (v.startsWith('faker.finance.pin')) return 'text-amber-400 bg-amber-400/10';
+  if (v.startsWith('faker.phone.nigeria')) return 'text-green-400 bg-green-400/10';
   return 'text-white bg-zinc-700/30';
 }
 
@@ -456,6 +468,12 @@ function getFieldName(variable: string): string {
     'faker.internet.url': 'url',
     'faker.phone.number': 'phone',
     'faker.string.uuid': 'id',
+    'faker.finance.pin.4': 'pin',
+    'faker.finance.pin.6': 'passcode',
+    'faker.finance.pin.8': 'passcode',
+    'faker.number.digits.4': 'pin',
+    'faker.number.digits.6': 'passcode',
+    'faker.number.digits.8': 'passcode',
     'faker.phone.nigeria': 'phone',
     'faker.phone.nigeria.mtn': 'phone',
     'faker.phone.nigeria.airtel': 'phone',

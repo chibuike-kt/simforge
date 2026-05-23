@@ -16,22 +16,30 @@ function resolveVariable(
   customKv: Record<string, unknown>,
 ): string {
   // Step response extraction: {{step.1.response.fieldName}}
-  // Looks for step_1_fieldName in customKv
   const stepMatch = variable.match(/^step\.(\d+)\.response\.(.+)$/);
   if (stepMatch) {
-    const stepNum = stepMatch[1];
-    const varName = stepMatch[2];
-    // Try step_N_varName first, then plain varName as fallback
-    const key = `step_${stepNum}_${varName}`;
-    const value = customKv[key] ?? customKv[varName];
-    if (value !== undefined && value !== '') {
-      return String(value);
-    }
+    const key = `step_${stepMatch[1]}_${stepMatch[2]}`;
+    const value = customKv[key] ?? customKv[stepMatch[2]];
+    if (value !== undefined && value !== '') return String(value);
     console.warn(
       `[Template] Could not resolve ${variable} — key=${key} customKv keys:`,
       Object.keys(customKv),
     );
     return '';
+  }
+
+  // Dynamic digit strings: {{faker.number.digits.N}}
+  const digitsMatch = variable.match(/^faker\.number\.digits\.(\d+)$/);
+  if (digitsMatch) {
+    const n = parseInt(digitsMatch[1]);
+    return Array.from({ length: n }, () => faker.number.int({ min: 0, max: 9 })).join('');
+  }
+
+  // Dynamic pin: {{faker.finance.pin.N}}
+  const pinMatch = variable.match(/^faker\.finance\.pin\.(\d+)$/);
+  if (pinMatch) {
+    const n = parseInt(pinMatch[1]);
+    return faker.finance.pin({ length: n });
   }
 
   // Region variables
@@ -104,8 +112,7 @@ function resolveVariable(
         '0909',
       ];
       const prefix = prefixes[Math.floor(faker.number.int({ min: 0, max: prefixes.length - 1 }))];
-      const suffix = faker.number.int({ min: 1000000, max: 9999999 }).toString();
-      return `+234${prefix.slice(1)}${suffix}`;
+      return `+234${prefix.slice(1)}${faker.number.int({ min: 1000000, max: 9999999 })}`;
     }
     case 'faker.phone.nigeria.mtn': {
       const prefixes = [
@@ -166,6 +173,26 @@ function resolveVariable(
       return faker.finance.creditCardNumber();
     case 'faker.finance.pin':
       return faker.finance.pin();
+    case 'faker.finance.pin.4':
+      return faker.finance.pin({ length: 4 });
+    case 'faker.finance.pin.6':
+      return faker.finance.pin({ length: 6 });
+    case 'faker.finance.pin.8':
+      return faker.finance.pin({ length: 8 });
+
+    // Numbers
+    case 'faker.number.int':
+      return String(faker.number.int({ min: 1, max: 10000 }));
+    case 'faker.number.float':
+      return String(faker.number.float({ min: 0, max: 1000, fractionDigits: 2 }));
+    case 'faker.number.digits.4':
+      return Array.from({ length: 4 }, () => faker.number.int({ min: 0, max: 9 })).join('');
+    case 'faker.number.digits.5':
+      return Array.from({ length: 5 }, () => faker.number.int({ min: 0, max: 9 })).join('');
+    case 'faker.number.digits.6':
+      return Array.from({ length: 6 }, () => faker.number.int({ min: 0, max: 9 })).join('');
+    case 'faker.number.digits.8':
+      return Array.from({ length: 8 }, () => faker.number.int({ min: 0, max: 9 })).join('');
 
     // Commerce
     case 'faker.commerce.productName':
@@ -184,10 +211,6 @@ function resolveVariable(
       return faker.string.alphanumeric(12);
     case 'faker.string.nanoid':
       return faker.string.nanoid();
-    case 'faker.number.int':
-      return String(faker.number.int({ min: 1, max: 10000 }));
-    case 'faker.number.float':
-      return String(faker.number.float({ min: 0, max: 1000, fractionDigits: 2 }));
 
     // Date
     case 'faker.date.past':
@@ -286,9 +309,7 @@ export function extractFromResponse(
     );
 
     if (value !== undefined && value !== null) {
-      // Store with step index — matches {{step.N.response.varName}}
       customKv[`step_${stepIndex}_${varName}`] = value;
-      // Also store plain varName for convenience
       customKv[varName] = value;
       console.log(`[Extract] ✓ step_${stepIndex}_${varName} = ${value}`);
     } else {
