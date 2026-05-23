@@ -30,10 +30,23 @@ export class ScenarioController {
   }
 
   @Post(':id/runs')
-  submitRun(@Param('id') id: string) {
+  submitRun(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      agentCount?: number;
+      flowSteps?: Record<string, unknown>;
+      entryNodeId?: string;
+      baseUrl?: string;
+    },
+  ) {
     return this.scenarioService.submitRun(
       id,
       '00000000-0000-0000-0000-000000000000',
+      body?.agentCount,
+      body?.flowSteps,
+      body?.entryNodeId,
+      body?.baseUrl,
     );
   }
 

@@ -42,6 +42,18 @@ function resolveVariable(
     case 'faker.person.jobTitle':
       return faker.person.jobTitle();
 
+      // Nigerian phone numbers
+      case 'faker.phone.nigeria':
+        return `+234${faker.number.int({ min: 7000000000, max: 9099999999 }).toString().slice(1)}`;
+      case 'faker.phone.nigeria.mtn':
+        return `+2348${faker.number.int({ min: 10000000, max: 39999999 })}`;
+      case 'faker.phone.nigeria.airtel':
+        return `+2347${faker.number.int({ min: 10000000, max: 99999999 })}`;
+      case 'faker.phone.nigeria.glo':
+        return `+2348${faker.number.int({ min: 10000000, max: 09999999 })}`;
+      case 'faker.phone.nigeria.9mobile':
+        return `+2349${faker.number.int({ min: 10000000, max: 99999999 })}`;
+
     // Internet
     case 'faker.internet.email':
       return faker.internet.email();

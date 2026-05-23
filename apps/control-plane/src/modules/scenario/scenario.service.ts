@@ -86,7 +86,14 @@ export class ScenarioService {
     return row;
   }
 
-  async submitRun(scenarioId: string, submittedBy: string) {
+  async submitRun(
+    scenarioId: string,
+    submittedBy: string,
+    agentCount?: number,
+    flowSteps?: Record<string, unknown>,
+    entryNodeId?: string,
+    baseUrl?: string,
+  ) {
     const scenario = await this.findById(scenarioId);
     if (scenario.status !== ScenarioStatus.PUBLISHED) {
       throw new BadRequestException(
@@ -96,6 +103,15 @@ export class ScenarioService {
 
     const target = await this.targetService.findById(scenario.targetSystemId);
 
+    const trafficPattern = agentCount
+      ? {
+          ...scenario.trafficPattern,
+          steadyAgents: agentCount,
+          endAgents: agentCount,
+          burstAgents: agentCount,
+        }
+      : scenario.trafficPattern;
+
     const [run] = await this.sql`
     INSERT INTO simulation_runs (scenario_id, scenario_version, status, audit_trail)
     VALUES (
@@ -104,13 +120,17 @@ export class ScenarioService {
         this.sql.json({
           event: 'submitted',
           by: submittedBy,
+          agentCount: agentCount ?? null,
           at: new Date().toISOString(),
         }),
       ])}
     ) RETURNING *
   `;
 
-    const requiresApproval = this.targetService.requiresApproval(target, 1000);
+    const requiresApproval = this.targetService.requiresApproval(
+      target,
+      agentCount ?? 1000,
+    );
     if (!requiresApproval) {
       await this.sql`
       UPDATE simulation_runs
@@ -120,7 +140,13 @@ export class ScenarioService {
       const { OrchestrationService } =
         await import('../orchestration/orchestration.service');
       const orchestration = new OrchestrationService();
-      await orchestration.dispatch(run.id);
+      await orchestration.dispatch(
+        run.id,
+        trafficPattern,
+        flowSteps,
+        entryNodeId,
+        baseUrl,
+      );
     }
 
     return run;

@@ -21,12 +21,81 @@ const LOOP_THRESHOLD = 5;
 
 export type EventEmitter = (type: SimForgeEventType, payload: object) => Promise<void>;
 
+// ─── Model normalizer ─────────────────────────────────────────────────────────
+// BullMQ serializes through Redis JSON — JSONB fields may arrive as strings,
+// and the behavior model structure varies depending on how it was built.
+function normalizeModel(raw: BehaviorModel): BehaviorModel {
+  const any = raw as unknown as Record<string, unknown>;
+
+  // Try to get nodes from various locations
+  let nodes = raw.nodes;
+  let entryNodeId = raw.entryNodeId;
+
+  // nodes is a JSON string
+  if (typeof nodes === 'string') {
+    try {
+      nodes = JSON.parse(nodes as unknown as string);
+    } catch {
+      nodes = undefined as unknown as BehaviorModel['nodes'];
+    }
+  }
+
+  // nodes missing — try stateGraph
+  if (!nodes && any.stateGraph) {
+    const sg =
+      typeof any.stateGraph === 'string'
+        ? JSON.parse(any.stateGraph as string)
+        : (any.stateGraph as Record<string, unknown>);
+    nodes = (sg?.nodes ?? sg) as BehaviorModel['nodes'];
+    if (!entryNodeId && sg?.entryNodeId) entryNodeId = sg.entryNodeId as string;
+  }
+
+  // nodes is still a string after stateGraph extraction
+  if (typeof nodes === 'string') {
+    try {
+      nodes = JSON.parse(nodes as unknown as string);
+    } catch {
+      nodes = undefined as unknown as BehaviorModel['nodes'];
+    }
+  }
+
+  // Last resort — check if the model itself is the stateGraph
+  if (!nodes && any.nodes === undefined) {
+    const keys = Object.keys(any);
+    const likelyNodes = keys.every((k) => typeof any[k] === 'object');
+    if (likelyNodes && keys.length > 0) {
+      nodes = any as unknown as BehaviorModel['nodes'];
+    }
+  }
+
+  if (!nodes || typeof nodes !== 'object') {
+    console.error(
+      '[normalizeModel] Failed to resolve nodes.',
+      'raw keys:',
+      Object.keys(any),
+      'nodes type:',
+      typeof nodes,
+      'stateGraph type:',
+      typeof any.stateGraph,
+    );
+  }
+
+  return {
+    ...raw,
+    nodes: nodes ?? ({} as BehaviorModel['nodes']),
+    entryNodeId: entryNodeId ?? raw.entryNodeId,
+  };
+}
+
+// ─── AgentRuntime ─────────────────────────────────────────────────────────────
+
 export class AgentRuntime {
+  private readonly model: BehaviorModel;
   private readonly state: AgentState;
   private readonly rng: SeededRandom;
 
   constructor(
-    private model: BehaviorModel,
+    model: BehaviorModel,
     private readonly http: HttpAdapter,
     private readonly _rateLimiter: TokenBucket,
     private readonly emit: EventEmitter,
@@ -37,46 +106,13 @@ export class AgentRuntime {
     private readonly regionProfile?: RegionProfile,
   ) {
     this.rng = new SeededRandom(entropySeed);
-
-    // BullMQ serializes through Redis — JSONB fields may arrive as strings
-    if (typeof (this.model.nodes as unknown) === 'string') {
-      try {
-        this.model = {
-          ...this.model,
-          nodes: JSON.parse(this.model.nodes as unknown as string),
-        };
-        console.log(
-          '[AgentRuntime] Parsed model.nodes from string — keys:',
-          Object.keys(this.model.nodes),
-        );
-      } catch (e) {
-        console.error('[AgentRuntime] Failed to parse model.nodes:', e);
-      }
-    }
-
-    // Also handle case where nodes is nested under stateGraph
-    const modelAny = this.model as unknown as Record<string, unknown>;
-    if (!this.model.nodes && modelAny.stateGraph) {
-      const sg =
-        typeof modelAny.stateGraph === 'string'
-          ? JSON.parse(modelAny.stateGraph as string)
-          : (modelAny.stateGraph as Record<string, unknown>);
-      this.model = {
-        ...this.model,
-        nodes: sg.nodes as BehaviorModel['nodes'],
-        entryNodeId: (sg.entryNodeId as string) ?? this.model.entryNodeId,
-      };
-      console.log(
-        '[AgentRuntime] Extracted nodes from stateGraph — keys:',
-        Object.keys(this.model.nodes),
-      );
-    }
+    this.model = normalizeModel(model);
 
     this.state = {
       agentId: randomUUID(),
       runId,
       shardId,
-      currentNodeId: model.entryNodeId,
+      currentNodeId: this.model.entryNodeId,
       sessionToken: randomUUID(),
       historyRing: [],
       cooldownUntil: 0,
@@ -108,13 +144,13 @@ export class AgentRuntime {
       this.state.status = AgentStatus.ACTIVE;
       let steps = 0;
 
-      // Validate model structure upfront
-      if (!this.model.nodes || typeof this.model.nodes !== 'object') {
-        console.error(
-          `[AgentRuntime] Invalid model.nodes for agent ${this.state.agentId}:`,
-          typeof this.model.nodes,
-          this.model.nodes,
-        );
+      // Validate
+      if (
+        !this.model.nodes ||
+        typeof this.model.nodes !== 'object' ||
+        Object.keys(this.model.nodes).length === 0
+      ) {
+        console.error(`[AgentRuntime] No valid nodes for agent ${this.state.agentId}`);
         return this.fail('invalid_model_nodes');
       }
 
@@ -125,7 +161,7 @@ export class AgentRuntime {
       const entryNode = this.model.nodes[this.model.entryNodeId];
       if (!entryNode) {
         console.error(
-          `[AgentRuntime] Entry node "${this.model.entryNodeId}" not found in nodes:`,
+          `[AgentRuntime] Entry node "${this.model.entryNodeId}" not found. Available:`,
           Object.keys(this.model.nodes),
         );
         return this.fail(`entry_node_not_found:${this.model.entryNodeId}`);
@@ -135,13 +171,7 @@ export class AgentRuntime {
         if (++steps > MAX_STEPS) return this.fail('max_steps_exceeded');
 
         const node = this.model.nodes[this.state.currentNodeId];
-        if (!node) {
-          console.error(
-            `[AgentRuntime] Node "${this.state.currentNodeId}" not found. Available:`,
-            Object.keys(this.model.nodes),
-          );
-          return this.fail(`node_not_found:${this.state.currentNodeId}`);
-        }
+        if (!node) return this.fail(`node_not_found:${this.state.currentNodeId}`);
 
         if (node.type === 'abort') {
           this.state.status = AgentStatus.COMPLETED;
@@ -170,7 +200,6 @@ export class AgentRuntime {
         const now = Date.now();
         if (this.state.cooldownUntil > now) await sleep(this.state.cooldownUntil - now);
 
-        // Think time + region jitter
         const think = this.sampleThinkTime(node);
         const regionJitter = this.regionProfile
           ? Math.round(this.rng.next() * this.regionProfile.jitterMs)
@@ -226,7 +255,7 @@ export class AgentRuntime {
       console.error(
         `[AgentRuntime] Uncaught error in agent ${this.state.agentId}:`,
         err instanceof Error ? err.message : err,
-        err instanceof Error ? err.stack?.split('\n').slice(1, 4).join(' | ') : '',
+        err instanceof Error ? err.stack?.split('\n').slice(1, 3).join(' | ') : '',
       );
       return this.fail(`uncaught:${err instanceof Error ? err.message : String(err)}`);
     }
@@ -263,12 +292,10 @@ export class AgentRuntime {
       },
     );
 
-    // Simulate region packet loss
     const packetLost = this.regionProfile && this.rng.next() < this.regionProfile.packetLossRate;
 
     if (result.error || packetLost) {
       this.state.retryCount++;
-
       const shouldRetry = !this.regionProfile || this.rng.next() < this.regionProfile.retryRate;
 
       if (this.state.retryCount > node.maxRetries || !shouldRetry) {
@@ -291,7 +318,6 @@ export class AgentRuntime {
       }
     } else {
       const regionLatency = this.regionProfile ? this.sampleRegionLatency() : 0;
-
       await this.emit(SimForgeEventType.RESPONSE_RECEIVED, {
         agentId: this.state.agentId,
         runId: this.runId,
@@ -324,7 +350,7 @@ export class AgentRuntime {
     node: BehaviorNode,
     result: { statusCode: number } | null,
   ): string | null {
-    if (!node.transitions || !node.transitions.length) return null;
+    if (!node.transitions?.length) return null;
 
     const valid = node.transitions.filter((t) => {
       if (!t.guard) return true;

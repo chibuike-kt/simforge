@@ -6,6 +6,7 @@ import {
   SimulationJobEnvelope,
   TrafficPattern,
   TrafficPatternConfig,
+  BehaviorModel,
 } from '@simforge/shared';
 
 import { getDb } from '../../db/database';
@@ -22,10 +23,15 @@ export class OrchestrationService {
   private readonly targetService = new TargetSystemService();
   private readonly behaviorService = new BehaviorModelService();
 
-  async dispatch(runId: string): Promise<void> {
-    const [run] = await this.sql`
-      SELECT * FROM simulation_runs WHERE id = ${runId}
-    `;
+  async dispatch(
+    runId: string,
+    trafficPatternOverride?: unknown,
+    flowSteps?: Record<string, unknown>,
+    entryNodeId?: string,
+    baseUrl?: string,
+  ): Promise<void> {
+    const [run] = await this
+      .sql`SELECT * FROM simulation_runs WHERE id = ${runId}`;
     if (!run) throw new BadRequestException(`Run ${runId} not found`);
     if (run.status !== RunStatus.APPROVED) {
       throw new BadRequestException(
@@ -33,9 +39,8 @@ export class OrchestrationService {
       );
     }
 
-    const [scenario] = await this.sql`
-      SELECT * FROM simulation_scenarios WHERE id = ${run.scenarioId}
-    `;
+    const [scenario] = await this
+      .sql`SELECT * FROM simulation_scenarios WHERE id = ${run.scenarioId}`;
     if (!scenario) throw new BadRequestException(`Scenario not found`);
 
     const target = await this.targetService.findById(scenario.targetSystemId);
@@ -44,23 +49,37 @@ export class OrchestrationService {
     );
     if (!behaviorRaw) throw new BadRequestException(`Behavior model not found`);
 
-    // stateGraph is JSONB — may come back as object or string
+    const rawAny = behaviorRaw as unknown as Record<string, unknown>;
     const stateGraph =
-      typeof behaviorRaw.stateGraph === 'string'
-        ? JSON.parse(behaviorRaw.stateGraph)
-        : behaviorRaw.stateGraph;
+      typeof rawAny.stateGraph === 'string'
+        ? JSON.parse(rawAny.stateGraph as string)
+        : (rawAny.stateGraph as Record<string, unknown>);
+
+    // Use flow steps from UI if provided, otherwise fall back to stored behavior model
+    const nodes =
+      flowSteps ??
+      ((stateGraph?.nodes ?? stateGraph) as BehaviorModel['nodes']);
+    const resolvedEntryNodeId =
+      entryNodeId ??
+      (stateGraph?.entryNodeId as string) ??
+      (rawAny.entryNodeId as string) ??
+      '';
 
     const behaviorModel = {
       id: behaviorRaw.id,
       version: behaviorRaw.version,
       name: behaviorRaw.name,
-      entryNodeId: stateGraph.entryNodeId ?? behaviorRaw.entryNodeId,
-      nodes: stateGraph.nodes ?? stateGraph,
+      compiledHash: (rawAny.compiledHash as string) ?? '',
+      entryNodeId: resolvedEntryNodeId,
+      nodes: nodes as BehaviorModel['nodes'],
     };
 
-    const totalAgents = this.computeMaxAgents(
-      scenario.trafficPattern as TrafficPatternConfig,
-    );
+    // Use provided base URL or fall back to target's
+    const effectiveBaseUrl = baseUrl || target.allowedOrigins[0];
+
+    const effectivePattern = (trafficPatternOverride ??
+      scenario.trafficPattern) as TrafficPatternConfig;
+    const totalAgents = this.computeMaxAgents(effectivePattern);
     const shards = this.buildShards(totalAgents);
     const queue = getJobQueue();
     const dispatchedAt = new Date().toISOString();
@@ -74,14 +93,14 @@ export class OrchestrationService {
         agentIdRange: [shard.startId, shard.endId],
         behaviorModel,
         targetConfig: {
-          baseUrl: target.allowedOrigins[0],
-          allowedOrigins: target.allowedOrigins,
+          baseUrl: effectiveBaseUrl,
+          allowedOrigins: [...target.allowedOrigins, effectiveBaseUrl],
           maxRps: Math.floor(target.maxRps / shards.length),
           mode: target.mode,
         },
         timingConfig: {
           startOffsetMs: this.staggerOffset(shard.index, shards.length),
-          rampCurve: scenario.trafficPattern as TrafficPatternConfig,
+          rampCurve: effectivePattern,
         },
         signedAt: dispatchedAt,
       };
@@ -98,18 +117,18 @@ export class OrchestrationService {
     }
 
     await this.sql`
-      UPDATE simulation_runs
-      SET
-        status = ${RunStatus.DISPATCHED},
-        worker_assignment = ${this.sql.json(workerAssignment)},
-        audit_trail = array_append(audit_trail, ${this.sql.json({
-          event: 'dispatched',
-          shardCount: shards.length,
-          totalAgents,
-          at: dispatchedAt,
-        })}::jsonb)
-      WHERE id = ${runId}
-    `;
+    UPDATE simulation_runs
+    SET
+      status = ${RunStatus.DISPATCHED},
+      worker_assignment = ${this.sql.json(workerAssignment)},
+      audit_trail = array_append(audit_trail, ${this.sql.json({
+        event: 'dispatched',
+        shardCount: shards.length,
+        totalAgents,
+        at: dispatchedAt,
+      })}::jsonb)
+    WHERE id = ${runId}
+  `;
 
     console.log(
       `[Orchestration] Run ${runId} dispatched — ${shards.length} shards, ${totalAgents} agents`,

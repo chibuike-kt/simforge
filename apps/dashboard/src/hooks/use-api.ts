@@ -69,12 +69,23 @@ export function usePublishScenario() {
 }
 
 export function useSubmitRun() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (scenarioId: string) => api.submitRun(scenarioId),
+    mutationFn: ({
+      id,
+      agentCount,
+      flowSteps,
+      entryNodeId,
+      baseUrl,
+    }: {
+      id: string;
+      agentCount?: number;
+      flowSteps?: Record<string, unknown>;
+      entryNodeId?: string;
+      baseUrl?: string;
+    }) => api.submitRun(id, agentCount, flowSteps, entryNodeId, baseUrl),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['runs'] });
-      qc.invalidateQueries({ queryKey: ['pending-runs'] });
+      queryClient.invalidateQueries({ queryKey: ['runs'] });
     },
   });
 }
