@@ -64,7 +64,19 @@ function resolveVariable(
     case 'faker.internet.email':
       return faker.internet.email();
     case 'faker.internet.username':
-      return faker.internet.username();
+      return faker.internet
+        .username()
+        .replace(/[^a-zA-Z0-9_]/g, '_')
+        .slice(0, 30)
+        .padEnd(5, '_');
+    case 'faker.internet.username.safe': {
+      const base = faker.internet
+        .username()
+        .replace(/[^a-zA-Z0-9_]/g, '_')
+        .slice(0, 25);
+      const suffix = faker.number.int({ min: 100, max: 999 });
+      return `${base}_${suffix}`.slice(0, 30).padEnd(5, '_');
+    }
     case 'faker.internet.password':
       return faker.internet.password({ length: 12, memorable: false });
     case 'faker.internet.url':
