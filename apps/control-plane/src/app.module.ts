@@ -8,11 +8,23 @@ import { OrchestrationModule } from './modules/orchestration/orchestration.modul
 import { ApprovalModule } from './modules/approval/approval.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
+import { CollectionsModule } from './modules/collections/collections.module';
 
 @Module({
   imports: [
     AuthModule,
     UsersModule,
+    TargetModule,
+    BehaviorModule,
+    ScenarioModule,
+    OrchestrationModule,
+    ApprovalModule,
+    RealtimeModule,
+    MetricsModule,
+    CollectionsModule,
+  ],
+})
+export class AppModule {}
     TargetModule,
     BehaviorModule,
     ScenarioModule,

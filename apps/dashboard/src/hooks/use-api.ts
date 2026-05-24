@@ -131,3 +131,28 @@ export function useRejectRun() {
     },
   });
 }
+
+export function useCollections() {
+  return useQuery({
+    queryKey: ['collections'],
+    queryFn: () => api.getCollections(),
+  });
+}
+
+export function useCreateCollection() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; description?: string; color?: string }) =>
+      api.createCollection(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['collections'] }),
+  });
+}
+
+export function useAddScenarioToCollection() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ collectionId, scenarioId }: { collectionId: string; scenarioId: string }) =>
+      api.addScenarioToCollection(collectionId, scenarioId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['collections'] }),
+  });
+}

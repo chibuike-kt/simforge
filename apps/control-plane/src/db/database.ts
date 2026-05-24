@@ -200,4 +200,30 @@ const MIGRATIONS = [
       CREATE UNIQUE INDEX IF NOT EXISTS idx_run_metrics_run_shard ON run_metrics(run_id, shard_id);
     `,
   },
+  {
+    version: '004_collections',
+    sql: `
+    CREATE TABLE IF NOT EXISTS collections (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name        TEXT NOT NULL,
+      description TEXT,
+      color       TEXT NOT NULL DEFAULT '#3b82f6',
+      icon        TEXT NOT NULL DEFAULT 'folder',
+      created_by  UUID NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS collection_scenarios (
+      collection_id UUID NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+      scenario_id   UUID NOT NULL REFERENCES simulation_scenarios(id) ON DELETE CASCADE,
+      position      INTEGER NOT NULL DEFAULT 0,
+      added_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (collection_id, scenario_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_collection_scenarios_collection ON collection_scenarios(collection_id);
+    CREATE INDEX IF NOT EXISTS idx_collection_scenarios_scenario ON collection_scenarios(scenario_id);
+  `,
+  },
 ];

@@ -88,4 +88,17 @@ export const api = {
   getRunMetrics: (runId: string) => apiFetch<unknown>(`/api/metrics/runs/${runId}`),
   getScenarioRunMetrics: (scenarioId: string) =>
     apiFetch<unknown[]>(`/api/metrics/scenarios/${scenarioId}/runs`),
+
+  // Collections
+  getCollections: () => apiFetch<unknown[]>('/api/collections'),
+  createCollection: (data: { name: string; description?: string; color?: string }) =>
+    apiFetch('/api/collections', { method: 'POST', body: JSON.stringify(data) }),
+  deleteCollection: (id: string) => apiFetch(`/api/collections/${id}`, { method: 'DELETE' }),
+  addScenarioToCollection: (collectionId: string, scenarioId: string) =>
+    apiFetch(`/api/collections/${collectionId}/scenarios/${scenarioId}`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  removeScenarioFromCollection: (collectionId: string, scenarioId: string) =>
+    apiFetch(`/api/collections/${collectionId}/scenarios/${scenarioId}`, { method: 'DELETE' }),
 };
