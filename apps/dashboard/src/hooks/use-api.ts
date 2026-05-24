@@ -94,7 +94,6 @@ export function useScenarioRuns(scenarioId: string) {
   return useQuery({
     queryKey: ['runs', scenarioId],
     queryFn: () => api.getRuns(scenarioId),
-    enabled: !!scenarioId,
     refetchInterval: 5000,
   });
 }

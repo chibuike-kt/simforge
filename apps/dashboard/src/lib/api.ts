@@ -64,6 +64,7 @@ export const api = {
   createScenario: (data: unknown) =>
     apiFetch('/api/scenarios', { method: 'POST', body: JSON.stringify(data) }),
   publishScenario: (id: string) => apiFetch(`/api/scenarios/${id}/publish`, { method: 'PATCH' }),
+  getRuns: (scenarioId: string) => apiFetch<unknown[]>(`/api/scenarios/${scenarioId}/runs`),
   submitRun: (
     id: string,
     agentCount?: number,
