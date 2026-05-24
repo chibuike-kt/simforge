@@ -305,6 +305,9 @@ async function processJob(job: Job<SimulationJobEnvelope>): Promise<void> {
       case SimForgeEventType.ACTION_DLQ_SENT: {
         shardMetrics.totalErrors++;
         const errorKey = String(p.error ?? 'unknown');
+        console.error(
+          `[DLQ] agent=${p.agentId} node=${p.nodeId} error="${errorKey}" region=${p.regionCode}`,
+        );
         const existing = shardMetrics.errorSamples.find((e) => e.error === errorKey);
         if (existing) {
           existing.count++;
