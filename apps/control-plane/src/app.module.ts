@@ -25,13 +25,3 @@ import { CollectionsModule } from './modules/collections/collections.module';
   ],
 })
 export class AppModule {}
-    TargetModule,
-    BehaviorModule,
-    ScenarioModule,
-    OrchestrationModule,
-    ApprovalModule,
-    RealtimeModule,
-    MetricsModule,
-  ],
-})
-export class AppModule {}
