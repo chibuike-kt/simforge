@@ -9,6 +9,7 @@ import { ApprovalModule } from './modules/approval/approval.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { CollectionsModule } from './modules/collections/collections.module';
+import { RunsModule } from './modules/runs/runs.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { CollectionsModule } from './modules/collections/collections.module';
     RealtimeModule,
     MetricsModule,
     CollectionsModule,
+    RunsModule,
   ],
 })
 export class AppModule {}

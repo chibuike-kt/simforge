@@ -180,6 +180,23 @@ async function postMetrics(
       console.error(`[Metrics] POST failed ${res.status}:`, text);
     } else {
       console.log('[Metrics] Shard metrics posted successfully');
+      try {
+        console.log(`[Metrics] Updating run ${payload.runId} status to completed`);
+        const completeRes = await fetch(
+          `${env.CONTROL_PLANE_URL}/api/runs/${payload.runId}/complete`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ completedAt: new Date().toISOString() }),
+          },
+        );
+        console.log(`[Metrics] Run status update: ${completeRes.status}`);
+      } catch (err) {
+        console.error(
+          '[Metrics] Failed to update run status:',
+          err instanceof Error ? err.message : err,
+        );
+      }
     }
   } catch (err) {
     console.error(
