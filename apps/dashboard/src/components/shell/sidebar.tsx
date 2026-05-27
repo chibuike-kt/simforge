@@ -4,28 +4,11 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  ChevronLeft,
-  ChevronRight,
-  LayoutDashboard,
-  Target,
-  GitBranch,
-  Play,
-  BarChart2,
-  Settings,
-  LogOut,
-  Plus,
-  ChevronDown,
-  ChevronRight as ChevronRightIcon,
-  Zap,
-  Folder,
-  Activity,
-  Wifi,
-  WifiOff,
-  Loader2,
-  MoreHorizontal,
-  Trash2,
-  FolderPlus,
-  X,
+  ChevronLeft, ChevronRight, LayoutDashboard,
+  Target, GitBranch, Play, BarChart2, Settings,
+  LogOut, Plus, ChevronDown, ChevronRight as ChevronRightIcon,
+  Zap, Folder, Activity, Wifi, WifiOff, Loader2,
+  MoreHorizontal, Trash2, FolderPlus, X, BookOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { clearAuth, getUser } from '@/lib/auth';
@@ -153,10 +136,10 @@ export function Sidebar({ collapsed, onToggle, connected, isSimulating }: Sideba
       <div className="flex-1 overflow-y-auto py-2 space-y-0.5 px-1.5">
         {/* Dashboard */}
         <Link
-          href="/"
+          href="/dashboard"
           className={cn(
             'flex items-center gap-2.5 px-2 py-1.5 rounded text-xs transition-all',
-            isActive('/')
+            isActive('/dashboard')
               ? 'bg-zinc-800 text-white'
               : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50',
           )}
@@ -425,6 +408,20 @@ export function Sidebar({ collapsed, onToggle, connected, isSimulating }: Sideba
         </Link>
       </div>
 
+      <Link
+        href="/docs"
+        className={cn(
+          'flex items-center gap-2.5 px-2 py-1.5 rounded text-xs transition-all',
+          isActive('/docs')
+            ? 'bg-zinc-800 text-white'
+            : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50',
+        )}
+        title={collapsed ? 'Docs' : undefined}
+      >
+        <BookOpen size={13} className="flex-shrink-0" />
+        {!collapsed && <span>Docs</span>}
+      </Link>
+
       {/* Footer */}
       {!collapsed && (
         <div className="px-3 py-2 border-t border-zinc-800/60">
@@ -452,7 +449,7 @@ export function Sidebar({ collapsed, onToggle, connected, isSimulating }: Sideba
             <button
               onClick={() => {
                 clearAuth();
-                router.push('/login');
+                router.push('/');
               }}
               className="text-zinc-600 hover:text-zinc-400 transition-colors"
             >
